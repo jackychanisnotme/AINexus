@@ -13,6 +13,13 @@
 
 </div>
 
+> [!NOTE]
+> **本 fork 分支说明**：`upload/source-4a7ee-20260506` 同步自本地源码包 `ccNexus-native-compatible-fallback-source-4a7ee-20260506-211002.zip`，对应上游基线 `8f503ba`，用于保存 native-compatible fallback 版本源码。
+>
+> - 源码包 SHA256：`d0908ad2238a9986ee87b9482b2b29915310820aaf53b85f3336167cc2aee5f8`
+> - 源码快照提交：`d500af99b1480eb1c63e9e656d780d4249886dd6`
+> - 对比 master：<https://github.com/jackychanisnotme/ccNexus/compare/master...upload%2Fsource-4a7ee-20260506>
+
 ## 功能特性
 
 - **多端点轮换**：自动故障转移，一个失败自动切换下一个
