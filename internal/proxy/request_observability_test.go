@@ -131,7 +131,7 @@ func TestHandleProxyLogsRetryReasonAndFinalAttemptHeaders(t *testing.T) {
 		resolver:       NewEndpointResolverWithFunc(cfg.GetEndpoints),
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{\"model\":\"gpt-5.5\",\"stream\":false,\"input\":[]}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-ccNexus-Request-ID", "req-retry")
 	rec := httptest.NewRecorder()

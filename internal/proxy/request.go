@@ -328,6 +328,23 @@ func ensureCodexResponsesPayload(payload []byte) []byte {
 	return updated
 }
 
+func validateClientJSONRequestBody(payload []byte) error {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("request body is required")
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(trimmed, &body); err != nil {
+		return fmt.Errorf("invalid JSON request body: %w", err)
+	}
+	if body == nil {
+		return fmt.Errorf("request body must be a JSON object")
+	}
+
+	return nil
+}
+
 func forceStreamInPayload(payload []byte) []byte {
 	trimmed := strings.TrimSpace(string(payload))
 	if trimmed == "" || strings.HasPrefix(trimmed, "[") {

@@ -68,6 +68,33 @@ func TestOverrideModelInPayload(t *testing.T) {
 	}
 }
 
+func TestValidateClientJSONRequestBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "object", body: `{"model":"gpt-5.5"}`},
+		{name: "empty", body: ``, wantErr: true},
+		{name: "whitespace", body: `   `, wantErr: true},
+		{name: "truncated", body: `{"model":`, wantErr: true},
+		{name: "array", body: `[]`, wantErr: true},
+		{name: "null", body: `null`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClientJSONRequestBody([]byte(tt.body))
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("did not expect validation error: %v", err)
+			}
+		})
+	}
+}
+
 func TestForceStreamInPayloadAddsChatUsageOptions(t *testing.T) {
 	raw := []byte(`{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}`)
 	out := forceStreamInPayload(raw)

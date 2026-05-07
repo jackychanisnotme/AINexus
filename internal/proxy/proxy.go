@@ -343,6 +343,22 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	logger.DebugLog("Method: %s, Path: %s, ClientFormat: %s", r.Method, r.URL.Path, clientFormat)
 	logger.DebugLog("Request Body: %s", string(bodyBytes))
 
+	if err := validateClientJSONRequestBody(bodyBytes); err != nil {
+		logger.Warn("Invalid request body: %v content_type=%q content_length=%d %s", err, r.Header.Get("Content-Type"), len(bodyBytes), requestLogFields(obs, "", 0, http.StatusBadRequest, "invalid_request_body"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		errorResp := map[string]interface{}{
+			"error": map[string]interface{}{
+				"type":    "invalid_request_error",
+				"message": err.Error(),
+			},
+		}
+		if jsonBytes, err := json.Marshal(errorResp); err == nil {
+			w.Write(jsonBytes)
+		}
+		return
+	}
+
 	var streamReq struct {
 		Model    string      `json:"model"`
 		Thinking interface{} `json:"thinking"`
