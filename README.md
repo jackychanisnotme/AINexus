@@ -13,6 +13,13 @@
 
 </div>
 
+> [!NOTE]
+> **本 fork 分支说明**：`upload/source-4a7ee-20260506` 同步自本地源码包 `ccNexus-native-compatible-fallback-source-4a7ee-20260506-211002.zip`，对应上游基线 `8f503ba`，用于保存 native-compatible fallback 版本源码。
+>
+> - 源码包 SHA256：`d0908ad2238a9986ee87b9482b2b29915310820aaf53b85f3336167cc2aee5f8`
+> - 源码快照提交：`d500af99b1480eb1c63e9e656d780d4249886dd6`
+> - 对比 master：<https://github.com/jackychanisnotme/ccNexus/compare/master...upload%2Fsource-4a7ee-20260506>
+
 ## 功能特性
 
 - **多端点轮换**：自动故障转移，一个失败自动切换下一个
@@ -83,21 +90,6 @@ wire_api = "responses"  # 或 "chat"
 ```
 
 `~/.codex/auth.json` 可以忽略了。
-
-## 获取帮助
-
-<table>
-  <tr>
-    <td align="center"><img src="https://gitee.com/hea7en/images/raw/master/group/chat.png" alt="微信群" width="200"></td>
-    <td align="center"><img src="cmd/desktop/frontend/public/WeChat.jpg" alt="公众号" width="200"></td>
-    <td align="center"><img src="cmd/desktop/frontend/public/ME.png" alt="个人微信" width="200"></td>
-  </tr>
-  <tr>
-    <td align="center">问题反馈请加群</td>
-    <td align="center">公众号</td>
-    <td align="center">群过期请加好友</td>
-  </tr>
-</table>
 
 ## 文档
 
