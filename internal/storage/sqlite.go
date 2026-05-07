@@ -93,6 +93,8 @@ func (s *SQLiteStorage) initSchema() error {
 		enabled BOOLEAN DEFAULT TRUE,
 		transformer TEXT DEFAULT 'claude',
 		model TEXT,
+		thinking TEXT DEFAULT 'off',
+		force_stream BOOLEAN DEFAULT FALSE,
 		remark TEXT,
 		sort_order INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -180,6 +182,12 @@ func (s *SQLiteStorage) initSchema() error {
 	if err := s.migrateAuthMode(); err != nil {
 		return err
 	}
+	if err := s.migrateThinking(); err != nil {
+		return err
+	}
+	if err := s.migrateForceStream(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -226,11 +234,45 @@ func (s *SQLiteStorage) migrateAuthMode() error {
 	return err
 }
 
+func (s *SQLiteStorage) migrateThinking() error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('endpoints') WHERE name='thinking'`).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN thinking TEXT DEFAULT 'off'`); err != nil {
+			return err
+		}
+	}
+
+	_, err = s.db.Exec(`UPDATE endpoints SET thinking='off' WHERE thinking IS NULL OR thinking=''`)
+	return err
+}
+
+func (s *SQLiteStorage) migrateForceStream() error {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('endpoints') WHERE name='force_stream'`).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN force_stream BOOLEAN DEFAULT FALSE`); err != nil {
+			return err
+		}
+	}
+
+	_, err = s.db.Exec(`UPDATE endpoints SET force_stream=FALSE WHERE force_stream IS NULL`)
+	return err
+}
+
 func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, auth_mode, enabled, transformer, model, remark, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
+	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, auth_mode, enabled, transformer, model, thinking, force_stream, remark, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +281,7 @@ func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	var endpoints []Endpoint
 	for rows.Next() {
 		var ep Endpoint
-		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.AuthMode, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.AuthMode, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Thinking, &ep.ForceStream, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			return nil, err
 		}
 		normalizeEndpointAuthMode(&ep)
@@ -255,8 +297,8 @@ func (s *SQLiteStorage) SaveEndpoint(ep *Endpoint) error {
 
 	normalizeEndpointAuthMode(ep)
 
-	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, auth_mode, enabled, transformer, model, remark, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ep.Name, ep.APIUrl, ep.APIKey, ep.AuthMode, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.SortOrder)
+	result, err := s.db.Exec(`INSERT INTO endpoints (name, api_url, api_key, auth_mode, enabled, transformer, model, thinking, force_stream, remark, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ep.Name, ep.APIUrl, ep.APIKey, ep.AuthMode, ep.Enabled, ep.Transformer, ep.Model, ep.Thinking, ep.ForceStream, ep.Remark, ep.SortOrder)
 	if err != nil {
 		return err
 	}
@@ -275,8 +317,8 @@ func (s *SQLiteStorage) UpdateEndpoint(ep *Endpoint) error {
 
 	normalizeEndpointAuthMode(ep)
 
-	_, err := s.db.Exec(`UPDATE endpoints SET api_url=?, api_key=?, auth_mode=?, enabled=?, transformer=?, model=?, remark=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE name=?`,
-		ep.APIUrl, ep.APIKey, ep.AuthMode, ep.Enabled, ep.Transformer, ep.Model, ep.Remark, ep.SortOrder, ep.Name)
+	_, err := s.db.Exec(`UPDATE endpoints SET api_url=?, api_key=?, auth_mode=?, enabled=?, transformer=?, model=?, thinking=?, force_stream=?, remark=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE name=?`,
+		ep.APIUrl, ep.APIKey, ep.AuthMode, ep.Enabled, ep.Transformer, ep.Model, ep.Thinking, ep.ForceStream, ep.Remark, ep.SortOrder, ep.Name)
 	return err
 }
 
@@ -708,12 +750,34 @@ func (s *SQLiteStorage) getEndpointsFromDB(db *sql.DB, dbName string) ([]Endpoin
 		return nil, err
 	}
 
-	query := ""
-	if authModeColumnCount > 0 {
-		query = fmt.Sprintf(`SELECT id, name, api_url, api_key, COALESCE(auth_mode, 'api_key') as auth_mode, enabled, transformer, model, remark, COALESCE(sort_order, 0) as sort_order, created_at, updated_at FROM %s.endpoints`, dbName)
-	} else {
-		query = fmt.Sprintf(`SELECT id, name, api_url, api_key, 'api_key' as auth_mode, enabled, transformer, model, remark, COALESCE(sort_order, 0) as sort_order, created_at, updated_at FROM %s.endpoints`, dbName)
+	var thinkingColumnCount int
+	columnCheck = fmt.Sprintf(`SELECT COUNT(*) FROM %s.pragma_table_info('endpoints') WHERE name='thinking'`, dbName)
+	if err := db.QueryRow(columnCheck).Scan(&thinkingColumnCount); err != nil {
+		return nil, err
 	}
+
+	var forceStreamColumnCount int
+	columnCheck = fmt.Sprintf(`SELECT COUNT(*) FROM %s.pragma_table_info('endpoints') WHERE name='force_stream'`, dbName)
+	if err := db.QueryRow(columnCheck).Scan(&forceStreamColumnCount); err != nil {
+		return nil, err
+	}
+
+	selectAuthMode := "'api_key'"
+	if authModeColumnCount > 0 {
+		selectAuthMode = "COALESCE(auth_mode, 'api_key')"
+	}
+
+	selectThinking := "'off'"
+	if thinkingColumnCount > 0 {
+		selectThinking = "COALESCE(thinking, 'off')"
+	}
+
+	selectForceStream := "FALSE"
+	if forceStreamColumnCount > 0 {
+		selectForceStream = "COALESCE(force_stream, FALSE)"
+	}
+
+	query := fmt.Sprintf(`SELECT id, name, api_url, api_key, %s as auth_mode, enabled, transformer, model, %s as thinking, %s as force_stream, remark, COALESCE(sort_order, 0) as sort_order, created_at, updated_at FROM %s.endpoints`, selectAuthMode, selectThinking, selectForceStream, dbName)
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -724,7 +788,7 @@ func (s *SQLiteStorage) getEndpointsFromDB(db *sql.DB, dbName string) ([]Endpoin
 	var endpoints []Endpoint
 	for rows.Next() {
 		var ep Endpoint
-		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.AuthMode, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
+		if err := rows.Scan(&ep.ID, &ep.Name, &ep.APIUrl, &ep.APIKey, &ep.AuthMode, &ep.Enabled, &ep.Transformer, &ep.Model, &ep.Thinking, &ep.ForceStream, &ep.Remark, &ep.SortOrder, &ep.CreatedAt, &ep.UpdatedAt); err != nil {
 			return nil, err
 		}
 		normalizeEndpointAuthMode(&ep)
@@ -746,6 +810,8 @@ func normalizeEndpointAuthMode(ep *Endpoint) {
 		Enabled:     ep.Enabled,
 		Transformer: ep.Transformer,
 		Model:       ep.Model,
+		Thinking:    ep.Thinking,
+		ForceStream: ep.ForceStream,
 		Remark:      ep.Remark,
 	}
 	if normalized.Transformer == "" {
@@ -757,6 +823,8 @@ func normalizeEndpointAuthMode(ep *Endpoint) {
 	ep.AuthMode = normalized.AuthMode
 	ep.Transformer = normalized.Transformer
 	ep.Model = normalized.Model
+	ep.Thinking = normalized.Thinking
+	ep.ForceStream = normalized.ForceStream
 	ep.Remark = normalized.Remark
 }
 
@@ -781,6 +849,12 @@ func compareEndpoints(local, remote Endpoint) []string {
 	}
 	if local.Model != remote.Model {
 		conflicts = append(conflicts, "model")
+	}
+	if config.NormalizeThinkingEffort(local.Thinking) != config.NormalizeThinkingEffort(remote.Thinking) {
+		conflicts = append(conflicts, "thinking")
+	}
+	if local.ForceStream != remote.ForceStream {
+		conflicts = append(conflicts, "forceStream")
 	}
 	if local.Remark != remote.Remark {
 		conflicts = append(conflicts, "remark")
@@ -845,10 +919,26 @@ func (s *SQLiteStorage) mergeEndpoints(tx *sql.Tx, strategy MergeStrategy) error
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM backup.pragma_table_info('endpoints') WHERE name='auth_mode'`).Scan(&backupHasAuthMode); err != nil {
 		return err
 	}
+	var backupHasThinking int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM backup.pragma_table_info('endpoints') WHERE name='thinking'`).Scan(&backupHasThinking); err != nil {
+		return err
+	}
+	var backupHasForceStream int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM backup.pragma_table_info('endpoints') WHERE name='force_stream'`).Scan(&backupHasForceStream); err != nil {
+		return err
+	}
 
 	selectAuthMode := "'api_key'"
 	if backupHasAuthMode > 0 {
 		selectAuthMode = "COALESCE(auth_mode, 'api_key')"
+	}
+	selectThinking := "'off'"
+	if backupHasThinking > 0 {
+		selectThinking = "COALESCE(thinking, 'off')"
+	}
+	selectForceStream := "FALSE"
+	if backupHasForceStream > 0 {
+		selectForceStream = "COALESCE(force_stream, FALSE)"
 	}
 
 	switch strategy {
@@ -856,19 +946,19 @@ func (s *SQLiteStorage) mergeEndpoints(tx *sql.Tx, strategy MergeStrategy) error
 		// 只插入新端点（忽略冲突）
 		_, err := tx.Exec(fmt.Sprintf(`
 			INSERT OR IGNORE INTO endpoints
-			(name, api_url, api_key, auth_mode, enabled, transformer, model, remark, sort_order)
-			SELECT name, api_url, api_key, %s, enabled, transformer, model, remark, COALESCE(sort_order, 0)
+			(name, api_url, api_key, auth_mode, enabled, transformer, model, thinking, force_stream, remark, sort_order)
+			SELECT name, api_url, api_key, %s, enabled, transformer, model, %s, %s, remark, COALESCE(sort_order, 0)
 			FROM backup.endpoints
-		`, selectAuthMode))
+		`, selectAuthMode, selectThinking, selectForceStream))
 		return err
 	case MergeStrategyOverwriteLocal:
 		// 替换已存在的端点
 		_, err := tx.Exec(fmt.Sprintf(`
 			INSERT OR REPLACE INTO endpoints
-			(name, api_url, api_key, auth_mode, enabled, transformer, model, remark, sort_order)
-			SELECT name, api_url, api_key, %s, enabled, transformer, model, remark, COALESCE(sort_order, 0)
+			(name, api_url, api_key, auth_mode, enabled, transformer, model, thinking, force_stream, remark, sort_order)
+			SELECT name, api_url, api_key, %s, enabled, transformer, model, %s, %s, remark, COALESCE(sort_order, 0)
 			FROM backup.endpoints
-		`, selectAuthMode))
+		`, selectAuthMode, selectThinking, selectForceStream))
 		return err
 	default:
 		return fmt.Errorf("unknown merge strategy: %s", strategy)

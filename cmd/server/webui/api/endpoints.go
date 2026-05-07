@@ -118,6 +118,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Enabled     bool   `json:"enabled"`
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
+		Thinking    string `json:"thinking"`
+		ForceStream *bool  `json:"forceStream"`
 		Remark      string `json:"remark"`
 		CloneFrom   string `json:"cloneFrom"` // Clone from existing endpoint name
 	}
@@ -134,6 +136,13 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 			for _, ep := range endpoints {
 				if ep.Name == req.CloneFrom {
 					req.APIKey = ep.APIKey
+					if req.Thinking == "" {
+						req.Thinking = ep.Thinking
+					}
+					if req.ForceStream == nil {
+						forceStream := ep.ForceStream
+						req.ForceStream = &forceStream
+					}
 					break
 				}
 			}
@@ -141,12 +150,18 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authMode := config.NormalizeAuthMode(req.AuthMode)
+	forceStream := false
+	if req.ForceStream != nil {
+		forceStream = *req.ForceStream
+	}
 	normalizedEndpoint := config.Endpoint{
 		APIUrl:      normalizeAPIUrl(req.APIUrl),
 		APIKey:      req.APIKey,
 		AuthMode:    authMode,
 		Transformer: req.Transformer,
 		Model:       req.Model,
+		Thinking:    req.Thinking,
+		ForceStream: forceStream,
 		Remark:      req.Remark,
 	}
 	if normalizedEndpoint.Transformer == "" {
@@ -157,6 +172,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	req.APIUrl = normalizedEndpoint.APIUrl
 	req.APIKey = normalizedEndpoint.APIKey
 	req.Transformer = normalizedEndpoint.Transformer
+	req.Thinking = normalizedEndpoint.Thinking
+	forceStream = normalizedEndpoint.ForceStream
 
 	// Validate required fields
 	if req.Name == "" || req.APIUrl == "" {
@@ -196,6 +213,8 @@ func (h *Handler) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Enabled:     req.Enabled,
 		Transformer: req.Transformer,
 		Model:       req.Model,
+		Thinking:    req.Thinking,
+		ForceStream: forceStream,
 		Remark:      req.Remark,
 		SortOrder:   len(endpoints),
 		CreatedAt:   time.Now(),
@@ -227,6 +246,8 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 		Enabled     bool   `json:"enabled"`
 		Transformer string `json:"transformer"`
 		Model       string `json:"model"`
+		Thinking    string `json:"thinking"`
+		ForceStream *bool  `json:"forceStream"`
 		Remark      string `json:"remark"`
 	}
 
@@ -280,7 +301,12 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 		Enabled:     existing.Enabled,
 		Transformer: existing.Transformer,
 		Model:       existing.Model,
+		Thinking:    existing.Thinking,
+		ForceStream: existing.ForceStream,
 		Remark:      existing.Remark,
+	}
+	if req.ForceStream != nil {
+		normalizedEndpoint.ForceStream = *req.ForceStream
 	}
 	if normalizedEndpoint.Transformer == "" {
 		normalizedEndpoint.Transformer = "claude"
@@ -290,6 +316,8 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 	existing.APIKey = normalizedEndpoint.APIKey
 	existing.AuthMode = normalizedEndpoint.AuthMode
 	existing.Transformer = normalizedEndpoint.Transformer
+	existing.Thinking = normalizedEndpoint.Thinking
+	existing.ForceStream = normalizedEndpoint.ForceStream
 	if existing.AuthMode == config.AuthModeAPIKey && existing.APIKey == "" {
 		WriteError(w, http.StatusBadRequest, "apiKey is required in api_key mode")
 		return
@@ -300,6 +328,12 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request, name st
 	}
 	if req.Model != "" {
 		existing.Model = req.Model
+	}
+	if req.Thinking != "" {
+		existing.Thinking = config.NormalizeThinkingEffort(req.Thinking)
+	}
+	if req.ForceStream != nil {
+		existing.ForceStream = *req.ForceStream
 	}
 	existing.Remark = req.Remark
 	existing.UpdatedAt = time.Now()

@@ -11,6 +11,8 @@ type Endpoint struct {
 	Enabled     bool      `json:"enabled"`
 	Transformer string    `json:"transformer"`
 	Model       string    `json:"model"`
+	Thinking    string    `json:"thinking"`
+	ForceStream bool      `json:"forceStream"`
 	Remark      string    `json:"remark"`
 	SortOrder   int       `json:"sortOrder"`
 	CreatedAt   time.Time `json:"createdAt"`

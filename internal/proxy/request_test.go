@@ -68,6 +68,26 @@ func TestOverrideModelInPayload(t *testing.T) {
 	}
 }
 
+func TestForceStreamInPayloadAddsChatUsageOptions(t *testing.T) {
+	raw := []byte(`{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}`)
+	out := forceStreamInPayload(raw)
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if stream, ok := payload["stream"].(bool); !ok || !stream {
+		t.Fatalf("expected stream=true, got %#v", payload["stream"])
+	}
+	streamOptions, ok := payload["stream_options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected stream_options object, got %#v", payload["stream_options"])
+	}
+	if includeUsage, ok := streamOptions["include_usage"].(bool); !ok || !includeUsage {
+		t.Fatalf("expected include_usage=true, got %#v", streamOptions["include_usage"])
+	}
+}
+
 func TestShouldHandleAsStreamingResponseForCodexWithoutContentType(t *testing.T) {
 	endpoint := config.Endpoint{
 		Name:        "TokenPool",

@@ -97,6 +97,8 @@ export default {
         modelHelpOpenAI: '指定要使用的 OpenAI 模型',
         modelHelpOpenAI2: '指定 OpenAI 模型（Responses API）',
         modelHelpGemini: '指定要使用的 Gemini 模型',
+        forceStream: '上游强制流式',
+        forceStreamHelp: '当端点拒绝非流式请求时启用；ccNexus 会为非流式客户端聚合流式响应。',
         remark: '备注',
         remarkHelp: '可选：为此端点添加备注说明',
         cancel: '取消',

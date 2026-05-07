@@ -15,6 +15,12 @@ const (
 	AuthModeTokenPool      = "token_pool"
 	AuthModeCodexTokenPool = "codex_token_pool"
 
+	ThinkingOff    = "off"
+	ThinkingLow    = "low"
+	ThinkingMedium = "medium"
+	ThinkingHigh   = "high"
+	ThinkingXHigh  = "xhigh"
+
 	CodexTokenPoolAPIURL      = "https://chatgpt.com/backend-api/codex"
 	CodexTokenPoolTransformer = "openai2"
 )
@@ -35,12 +41,28 @@ func IsTokenPoolAuthMode(mode string) bool {
 	return normalized == AuthModeTokenPool || normalized == AuthModeCodexTokenPool
 }
 
+func NormalizeThinkingEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case ThinkingLow:
+		return ThinkingLow
+	case ThinkingMedium:
+		return ThinkingMedium
+	case ThinkingHigh:
+		return ThinkingHigh
+	case ThinkingXHigh:
+		return ThinkingXHigh
+	default:
+		return ThinkingOff
+	}
+}
+
 func ApplyEndpointAuthModeRules(ep *Endpoint) {
 	if ep == nil {
 		return
 	}
 
 	ep.AuthMode = NormalizeAuthMode(ep.AuthMode)
+	ep.Thinking = NormalizeThinkingEffort(ep.Thinking)
 	ep.APIUrl = strings.TrimSuffix(strings.TrimSpace(ep.APIUrl), "/")
 	ep.Transformer = strings.TrimSpace(ep.Transformer)
 
@@ -100,7 +122,9 @@ type Endpoint struct {
 	Enabled     bool   `json:"enabled"`
 	Transformer string `json:"transformer,omitempty"` // Transformer type: claude, openai, gemini, deepseek
 	Model       string `json:"model,omitempty"`       // Target model name for non-Claude APIs
-	Remark      string `json:"remark,omitempty"`      // Optional remark for the endpoint
+	Thinking    string `json:"thinking,omitempty"`    // Reasoning effort: off, low, medium, high, xhigh
+	ForceStream bool   `json:"forceStream,omitempty"`
+	Remark      string `json:"remark,omitempty"` // Optional remark for the endpoint
 }
 
 // WebDAVConfig represents WebDAV synchronization configuration
@@ -159,47 +183,47 @@ type ProxyConfig struct {
 
 // Config represents the application configuration
 type Config struct {
-	Port                  int             `json:"port"`
-	PortLocked            bool            `json:"-"` // CLI forced port, cannot be changed via API
-	BasicAuthEnabled     bool            `json:"basicAuthEnabled"`
-	BasicAuthUsername     string          `json:"basicAuthUsername"`
-	BasicAuthPassword    string          `json:"basicAuthPassword"`
-	Endpoints            []Endpoint      `json:"endpoints"`
-	LogLevel                  int             `json:"logLevel"`                      // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
-	Language                  string          `json:"language"`                      // UI language: en, zh-CN
-	Theme                     string          `json:"theme"`                         // UI theme: light, dark
-	ThemeAuto                 bool            `json:"themeAuto"`                     // Auto switch theme based on time
-	AutoLightTheme            string          `json:"autoLightTheme,omitempty"`      // Theme to use in daytime when auto mode is on
-	AutoDarkTheme             string          `json:"autoDarkTheme,omitempty"`       // Theme to use in nighttime when auto mode is on
-	WindowWidth               int             `json:"windowWidth"`                   // Window width in pixels
-	WindowHeight              int             `json:"windowHeight"`                  // Window height in pixels
-	CloseWindowBehavior       string          `json:"closeWindowBehavior,omitempty"` // "quit", "minimize", "ask"
-	ClaudeNotificationEnabled bool            `json:"claudeNotificationEnabled"`     // Enable Claude Code task completion notification
-	ClaudeNotificationType    string          `json:"claudeNotificationType"`        // Notification type: toast, dialog, disabled
-	ModelsCacheTTL            int             `json:"modelsCacheTTL,omitempty"`      // /v1/models cache TTL in minutes, default 30
+	Port                      int             `json:"port"`
+	PortLocked                bool            `json:"-"` // CLI forced port, cannot be changed via API
+	BasicAuthEnabled          bool            `json:"basicAuthEnabled"`
+	BasicAuthUsername         string          `json:"basicAuthUsername"`
+	BasicAuthPassword         string          `json:"basicAuthPassword"`
+	Endpoints                 []Endpoint      `json:"endpoints"`
+	LogLevel                  int             `json:"logLevel"`                            // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+	Language                  string          `json:"language"`                            // UI language: en, zh-CN
+	Theme                     string          `json:"theme"`                               // UI theme: light, dark
+	ThemeAuto                 bool            `json:"themeAuto"`                           // Auto switch theme based on time
+	AutoLightTheme            string          `json:"autoLightTheme,omitempty"`            // Theme to use in daytime when auto mode is on
+	AutoDarkTheme             string          `json:"autoDarkTheme,omitempty"`             // Theme to use in nighttime when auto mode is on
+	WindowWidth               int             `json:"windowWidth"`                         // Window width in pixels
+	WindowHeight              int             `json:"windowHeight"`                        // Window height in pixels
+	CloseWindowBehavior       string          `json:"closeWindowBehavior,omitempty"`       // "quit", "minimize", "ask"
+	ClaudeNotificationEnabled bool            `json:"claudeNotificationEnabled"`           // Enable Claude Code task completion notification
+	ClaudeNotificationType    string          `json:"claudeNotificationType"`              // Notification type: toast, dialog, disabled
+	ModelsCacheTTL            int             `json:"modelsCacheTTL,omitempty"`            // /v1/models cache TTL in minutes, default 30
 	ModelsCacheRefreshEnabled bool            `json:"modelsCacheRefreshEnabled,omitempty"` // Enable ?refresh=true parameter, default false
-	WebDAV                    *WebDAVConfig   `json:"webdav,omitempty"`              // WebDAV synchronization config
-	Backup                    *BackupConfig   `json:"backup,omitempty"`              // Backup/sync configuration
-	Update                    *UpdateConfig   `json:"update,omitempty"`              // Update configuration
-	Terminal                  *TerminalConfig `json:"terminal,omitempty"`            // Terminal launcher config
-	Proxy                     *ProxyConfig    `json:"proxy,omitempty"`               // HTTP proxy config
-	CodexProxy                *ProxyConfig    `json:"codexProxy,omitempty"`          // Codex dedicated proxy config
+	WebDAV                    *WebDAVConfig   `json:"webdav,omitempty"`                    // WebDAV synchronization config
+	Backup                    *BackupConfig   `json:"backup,omitempty"`                    // Backup/sync configuration
+	Update                    *UpdateConfig   `json:"update,omitempty"`                    // Update configuration
+	Terminal                  *TerminalConfig `json:"terminal,omitempty"`                  // Terminal launcher config
+	Proxy                     *ProxyConfig    `json:"proxy,omitempty"`                     // HTTP proxy config
+	CodexProxy                *ProxyConfig    `json:"codexProxy,omitempty"`                // Codex dedicated proxy config
 	mu                        sync.RWMutex
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Port:               3000,
-		BasicAuthEnabled:   true,
-		BasicAuthUsername:  "admin",
-		BasicAuthPassword: "",
-		LogLevel:          1,       // Default to INFO level
-		Language:     "zh-CN", // Default to Chinese
-		WindowWidth:  1024,    // Default window width
-		WindowHeight: 768,     // Default window height
-		ModelsCacheTTL:              30,    // Default 30 minutes
-		ModelsCacheRefreshEnabled:  false, // Default disabled
+		Port:                      3000,
+		BasicAuthEnabled:          true,
+		BasicAuthUsername:         "admin",
+		BasicAuthPassword:         "",
+		LogLevel:                  1,       // Default to INFO level
+		Language:                  "zh-CN", // Default to Chinese
+		WindowWidth:               1024,    // Default window width
+		WindowHeight:              768,     // Default window height
+		ModelsCacheTTL:            30,      // Default 30 minutes
+		ModelsCacheRefreshEnabled: false,   // Default disabled
 		Endpoints: []Endpoint{
 			{
 				Name:        "Claude Official",
@@ -584,6 +608,8 @@ type StorageEndpoint struct {
 	Enabled     bool
 	Transformer string
 	Model       string
+	Thinking    string
+	ForceStream bool
 	Remark      string
 	SortOrder   int
 }
@@ -608,6 +634,8 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 			Enabled:     ep.Enabled,
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
+			Thinking:    ep.Thinking,
+			ForceStream: ep.ForceStream,
 			Remark:      ep.Remark,
 		}
 		if endpoint.Transformer == "" {
@@ -861,6 +889,8 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 			Enabled:     ep.Enabled,
 			Transformer: ep.Transformer,
 			Model:       ep.Model,
+			Thinking:    ep.Thinking,
+			ForceStream: ep.ForceStream,
 			Remark:      ep.Remark,
 		}
 		if normalizedEndpoint.Transformer == "" {
@@ -873,6 +903,8 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 		endpoint.Enabled = normalizedEndpoint.Enabled
 		endpoint.Transformer = normalizedEndpoint.Transformer
 		endpoint.Model = normalizedEndpoint.Model
+		endpoint.Thinking = normalizedEndpoint.Thinking
+		endpoint.ForceStream = normalizedEndpoint.ForceStream
 		endpoint.Remark = normalizedEndpoint.Remark
 		endpoint.SortOrder = i
 

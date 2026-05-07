@@ -139,6 +139,7 @@ func (p *Proxy) UpdateConfig(cfg *config.Config) error {
 	}
 
 	p.config = cfg
+	p.resolver = NewEndpointResolverWithFunc(cfg.GetEndpoints)
 
 	// Try to find the previous current endpoint in new config
 	newEndpoints := p.getEnabledEndpoints()
@@ -159,6 +160,10 @@ func (p *Proxy) UpdateConfig(cfg *config.Config) error {
 	} else {
 		p.currentIndex = 0
 	}
+
+	// Clear endpoint cooldowns so manual config changes take effect immediately.
+	p.clearEndpointCooldowns()
+	logger.Debug("[CONFIG UPDATE] Cleared endpoint cooldowns")
 
 	// Clear models cache to force refresh with new endpoints
 	if p.modelsCache != nil {

@@ -79,6 +79,8 @@ export default {
         addEndpoint: 'Add Endpoint',
         cloneEndpoint: 'Clone',
         remark: 'Remark',
+        forceStream: 'Force streaming upstream',
+        forceStreamHint: 'Use when this endpoint rejects non-streaming requests; ccNexus aggregates the stream for non-streaming clients.',
         fetchModels: 'Fetch Models',
         fetchModelsHint: 'Click "Fetch Models" to load available models from the API',
         modelPlaceholder: 'gpt-4, gemini-pro, etc.',

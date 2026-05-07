@@ -387,6 +387,13 @@ class Endpoints {
                                 <small class="text-muted">${t('endpoints.fetchModelsHint')}</small>
                             </div>
                             <div class="form-group">
+                                <label>
+                                    <input type="checkbox" class="form-checkbox" name="forceStream" ${endpoint?.forceStream ? 'checked' : ''}>
+                                    ${t('endpoints.forceStream')}
+                                </label>
+                                <small class="text-muted">${t('endpoints.forceStreamHint')}</small>
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label">${t('endpoints.remark')}</label>
                                 <textarea class="form-textarea" name="remark">${endpoint ? this.escapeHtml(endpoint.remark || '') : ''}</textarea>
                             </div>
@@ -519,6 +526,7 @@ class Endpoints {
             apiKey: formData.get('apiKey'),
             transformer: formData.get('transformer'),
             model: formData.get('model'),
+            forceStream: formData.get('forceStream') === 'on',
             remark: formData.get('remark'),
             enabled: formData.get('enabled') === 'on'
         };
@@ -652,6 +660,8 @@ class Endpoints {
             apiUrl: endpoint.apiUrl,
             transformer: endpoint.transformer,
             model: endpoint.model,
+            thinking: endpoint.thinking,
+            forceStream: !!endpoint.forceStream,
             remark: endpoint.remark,
             enabled: endpoint.enabled,
             cloneFrom: name  // Reference to source endpoint

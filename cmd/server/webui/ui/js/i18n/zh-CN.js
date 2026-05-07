@@ -79,6 +79,8 @@ export default {
         addEndpoint: '添加端点',
         cloneEndpoint: '克隆端点',
         remark: '备注',
+        forceStream: '上游强制流式',
+        forceStreamHint: '当端点拒绝非流式请求时启用；ccNexus 会为非流式客户端聚合流式响应。',
         fetchModels: '获取模型',
         fetchModelsHint: '点击"获取模型"从 API 加载可用模型',
         modelPlaceholder: 'gpt-4、gemini-pro 等',

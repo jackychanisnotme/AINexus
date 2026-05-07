@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/lich0821/ccNexus/internal/config"
@@ -222,6 +223,7 @@ func (p *Proxy) handleStreamingAsNonStreaming(w http.ResponseWriter, resp *http.
 
 	var completedPayload []byte
 	var lastJSONPayload []byte
+	chatAccumulator := newOpenAIChatStreamAccumulator()
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
@@ -236,6 +238,9 @@ func (p *Proxy) handleStreamingAsNonStreaming(w http.ResponseWriter, resp *http.
 
 		var event map[string]interface{}
 		if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
+			continue
+		}
+		if chatAccumulator.addChunk(event) {
 			continue
 		}
 		if eventType, _ := event["type"].(string); eventType != "response.completed" {
@@ -255,6 +260,15 @@ func (p *Proxy) handleStreamingAsNonStreaming(w http.ResponseWriter, resp *http.
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, 0, "", err
+	}
+	if len(completedPayload) == 0 {
+		if chatAccumulator.hasData() {
+			payload, err := chatAccumulator.payload()
+			if err != nil {
+				return 0, 0, "", err
+			}
+			completedPayload = payload
+		}
 	}
 	if len(completedPayload) == 0 {
 		if len(lastJSONPayload) == 0 {
@@ -302,6 +316,256 @@ func (p *Proxy) handleStreamingAsNonStreaming(w http.ResponseWriter, resp *http.
 	)
 
 	return inputTokens, outputTokens, outputText, nil
+}
+
+type openAIChatStreamAccumulator struct {
+	id                string
+	created           interface{}
+	model             string
+	systemFingerprint interface{}
+	usage             map[string]interface{}
+	choices           map[int]*openAIChatStreamChoice
+	seen              bool
+}
+
+type openAIChatStreamChoice struct {
+	index            int
+	role             string
+	content          string
+	reasoningContent string
+	toolCalls        map[int]*openAIChatStreamToolCall
+	finishReason     interface{}
+}
+
+type openAIChatStreamToolCall struct {
+	index     int
+	id        string
+	callType  string
+	name      string
+	arguments string
+}
+
+func newOpenAIChatStreamAccumulator() *openAIChatStreamAccumulator {
+	return &openAIChatStreamAccumulator{
+		choices: make(map[int]*openAIChatStreamChoice),
+	}
+}
+
+func (a *openAIChatStreamAccumulator) hasData() bool {
+	return a != nil && a.seen
+}
+
+func (a *openAIChatStreamAccumulator) addChunk(event map[string]interface{}) bool {
+	if a == nil || !isOpenAIChatStreamChunk(event) {
+		return false
+	}
+	a.seen = true
+
+	if id, ok := event["id"].(string); ok && id != "" && a.id == "" {
+		a.id = id
+	}
+	if created, ok := event["created"]; ok && a.created == nil {
+		a.created = created
+	}
+	if model, ok := event["model"].(string); ok && model != "" && a.model == "" {
+		a.model = model
+	}
+	if fp, ok := event["system_fingerprint"]; ok && a.systemFingerprint == nil {
+		a.systemFingerprint = fp
+	}
+	if usage, ok := event["usage"].(map[string]interface{}); ok && len(usage) > 0 {
+		a.usage = usage
+	}
+
+	choices, _ := event["choices"].([]interface{})
+	for _, choiceValue := range choices {
+		choiceMap, ok := choiceValue.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		index := parseTokenNumber(choiceMap["index"])
+		choice := a.choice(index)
+
+		if finishReason, ok := choiceMap["finish_reason"]; ok && finishReason != nil {
+			choice.finishReason = finishReason
+		}
+
+		delta, ok := choiceMap["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, ok := delta["role"].(string); ok && role != "" {
+			choice.role = role
+		}
+		if content, ok := delta["content"].(string); ok && content != "" {
+			choice.content += content
+		}
+		if reasoningContent, ok := delta["reasoning_content"].(string); ok && reasoningContent != "" {
+			choice.reasoningContent += reasoningContent
+		}
+		if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
+			choice.addToolCalls(toolCalls)
+		}
+	}
+
+	return true
+}
+
+func (a *openAIChatStreamAccumulator) choice(index int) *openAIChatStreamChoice {
+	choice, ok := a.choices[index]
+	if ok {
+		return choice
+	}
+	choice = &openAIChatStreamChoice{
+		index:     index,
+		role:      "assistant",
+		toolCalls: make(map[int]*openAIChatStreamToolCall),
+	}
+	a.choices[index] = choice
+	return choice
+}
+
+func (c *openAIChatStreamChoice) addToolCalls(toolCallValues []interface{}) {
+	for _, toolCallValue := range toolCallValues {
+		toolCallMap, ok := toolCallValue.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		index := parseTokenNumber(toolCallMap["index"])
+		toolCall := c.toolCall(index)
+
+		if id, ok := toolCallMap["id"].(string); ok && id != "" {
+			toolCall.id = id
+		}
+		if callType, ok := toolCallMap["type"].(string); ok && callType != "" {
+			toolCall.callType = callType
+		}
+		function, _ := toolCallMap["function"].(map[string]interface{})
+		if name, ok := function["name"].(string); ok && name != "" {
+			toolCall.name = name
+		}
+		if arguments, ok := function["arguments"].(string); ok && arguments != "" {
+			toolCall.arguments += arguments
+		}
+	}
+}
+
+func (c *openAIChatStreamChoice) toolCall(index int) *openAIChatStreamToolCall {
+	toolCall, ok := c.toolCalls[index]
+	if ok {
+		return toolCall
+	}
+	toolCall = &openAIChatStreamToolCall{index: index, callType: "function"}
+	c.toolCalls[index] = toolCall
+	return toolCall
+}
+
+func (a *openAIChatStreamAccumulator) payload() ([]byte, error) {
+	choices := make([]map[string]interface{}, 0, len(a.choices))
+	indices := make([]int, 0, len(a.choices))
+	for index := range a.choices {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	for _, index := range indices {
+		choice := a.choices[index]
+		message := map[string]interface{}{
+			"role":    choice.role,
+			"content": choice.content,
+		}
+		if choice.reasoningContent != "" {
+			message["reasoning_content"] = choice.reasoningContent
+		}
+		if len(choice.toolCalls) > 0 {
+			message["tool_calls"] = choice.toolCallPayloads()
+		}
+		finishReason := choice.finishReason
+		if finishReason == nil {
+			finishReason = "stop"
+		}
+		choices = append(choices, map[string]interface{}{
+			"index":         choice.index,
+			"message":       message,
+			"finish_reason": finishReason,
+		})
+	}
+
+	created := a.created
+	if created == nil {
+		created = 0
+	}
+	payload := map[string]interface{}{
+		"id":      a.id,
+		"object":  "chat.completion",
+		"created": created,
+		"model":   a.model,
+		"choices": choices,
+	}
+	if a.usage != nil {
+		payload["usage"] = a.usage
+	} else {
+		payload["usage"] = map[string]interface{}{
+			"prompt_tokens":     0,
+			"completion_tokens": 0,
+			"total_tokens":      0,
+		}
+	}
+	if a.systemFingerprint != nil {
+		payload["system_fingerprint"] = a.systemFingerprint
+	}
+
+	return json.Marshal(payload)
+}
+
+func (c *openAIChatStreamChoice) toolCallPayloads() []map[string]interface{} {
+	indices := make([]int, 0, len(c.toolCalls))
+	for index := range c.toolCalls {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	payloads := make([]map[string]interface{}, 0, len(indices))
+	for _, index := range indices {
+		toolCall := c.toolCalls[index]
+		payloads = append(payloads, map[string]interface{}{
+			"index": toolCall.index,
+			"id":    toolCall.id,
+			"type":  toolCall.callType,
+			"function": map[string]interface{}{
+				"name":      toolCall.name,
+				"arguments": toolCall.arguments,
+			},
+		})
+	}
+	return payloads
+}
+
+func isOpenAIChatStreamChunk(event map[string]interface{}) bool {
+	if event == nil {
+		return false
+	}
+	object, _ := event["object"].(string)
+	if object == "chat.completion.chunk" {
+		return true
+	}
+	if object != "" {
+		return false
+	}
+	choices, ok := event["choices"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, choiceValue := range choices {
+		choiceMap, ok := choiceValue.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := choiceMap["delta"].(map[string]interface{}); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // formatRequestSize formats byte size into human-readable string

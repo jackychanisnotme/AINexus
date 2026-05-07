@@ -97,6 +97,8 @@ export default {
         modelHelpOpenAI: 'Specify the OpenAI model to use',
         modelHelpOpenAI2: 'Specify the OpenAI model (Responses API)',
         modelHelpGemini: 'Specify the Gemini model to use',
+        forceStream: 'Force streaming upstream',
+        forceStreamHelp: 'Use when this endpoint rejects non-streaming requests; ccNexus aggregates the stream for non-streaming clients.',
         remark: 'Remark',
         remarkHelp: 'Optional: Add a remark for this endpoint',
         cancel: 'Cancel',

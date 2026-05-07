@@ -60,12 +60,12 @@ func prepareCCTransformer(endpoint config.Endpoint, endpointTransformer string) 
 		if endpoint.Model == "" {
 			return nil, fmt.Errorf("OpenAI transformer requires model field")
 		}
-		return cc.NewOpenAITransformer(endpoint.Model), nil
+		return cc.NewOpenAITransformerWithThinking(endpoint.Model, endpoint.Thinking), nil
 	case "openai2":
 		if endpoint.Model == "" {
 			return nil, fmt.Errorf("OpenAI2 transformer requires model field")
 		}
-		return cc.NewOpenAI2Transformer(endpoint.Model), nil
+		return cc.NewOpenAI2TransformerWithThinking(endpoint.Model, endpoint.Thinking), nil
 	case "gemini":
 		if endpoint.Model == "" {
 			return nil, fmt.Errorf("Gemini transformer requires model field")
@@ -320,6 +320,35 @@ func ensureCodexResponsesPayload(payload []byte) []byte {
 	body["stream"] = true
 	if _, ok := body["instructions"]; !ok {
 		body["instructions"] = ""
+	}
+	updated, err := json.Marshal(body)
+	if err != nil {
+		return payload
+	}
+	return updated
+}
+
+func forceStreamInPayload(payload []byte) []byte {
+	trimmed := strings.TrimSpace(string(payload))
+	if trimmed == "" || strings.HasPrefix(trimmed, "[") {
+		return payload
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return payload
+	}
+	if body == nil {
+		return payload
+	}
+	body["stream"] = true
+	if _, ok := body["messages"]; ok {
+		streamOptions, _ := body["stream_options"].(map[string]interface{})
+		if streamOptions == nil {
+			streamOptions = make(map[string]interface{})
+		}
+		streamOptions["include_usage"] = true
+		body["stream_options"] = streamOptions
 	}
 	updated, err := json.Marshal(body)
 	if err != nil {
