@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -152,6 +153,121 @@ func TestRequestPlanStartsAtNextEndpointWhenCurrentIsCooled(t *testing.T) {
 	plan := newRequestEndpointPlanForCurrent(available, endpoints, p.GetCurrentEndpointName())
 	if got := plan.Current().Name; got != "B" {
 		t.Fatalf("expected request plan to start at next available endpoint B when current A is cooled, got %q", got)
+	}
+}
+
+func TestRequestPlanDeprioritizesRecoveredCurrentEndpoint(t *testing.T) {
+	endpoints := []config.Endpoint{
+		failoverPolicyTestEndpoint("A", "https://a.example"),
+		failoverPolicyTestEndpoint("B", "https://b.example"),
+		failoverPolicyTestEndpoint("C", "https://c.example"),
+	}
+	cfg := config.DefaultConfig()
+	cfg.UpdateEndpoints(endpoints)
+	p := New(cfg, &noopStatsStorage{}, nil, "test-device")
+
+	p.cooldownMu.Lock()
+	p.endpointCooldowns["A"] = endpointCooldown{Reason: "quota_exhausted", Until: time.Now().Add(-time.Second)}
+	p.cooldownMu.Unlock()
+
+	available := p.getRequestPlanEndpoints(endpoints, requestObservability{RequestID: "req-plan-recovered"})
+	plan := newRequestEndpointPlanForCurrentWithSkip(available, endpoints, p.GetCurrentEndpointName(), p.isEndpointDeprioritized(p.GetCurrentEndpointName()))
+	if got := plan.Current().Name; got != "B" {
+		t.Fatalf("expected recovered current endpoint to be deprioritized behind B, got %q", got)
+	}
+	if got := plan.Advance().Name; got != "C" {
+		t.Fatalf("expected C after B, got %q", got)
+	}
+	if got := plan.Advance().Name; got != "A" {
+		t.Fatalf("expected recovered A to remain as final fallback, got %q", got)
+	}
+}
+
+func TestRequestPlanAutoReturnsRecoveredCurrentEndpoint(t *testing.T) {
+	endpoints := []config.Endpoint{
+		failoverPolicyTestEndpoint("A", "https://a.example"),
+		failoverPolicyTestEndpoint("B", "https://b.example"),
+	}
+	cfg := config.DefaultConfig()
+	cfg.UpdateEndpoints(endpoints)
+	cfg.UpdateFailover(&config.FailoverConfig{RecoveredEndpointPolicy: config.RecoveredEndpointPolicyAutoReturn})
+	p := New(cfg, &noopStatsStorage{}, nil, "test-device")
+
+	p.cooldownMu.Lock()
+	p.endpointCooldowns["A"] = endpointCooldown{Reason: "quota_exhausted", Until: time.Now().Add(-time.Second)}
+	p.cooldownMu.Unlock()
+
+	available := p.getRequestPlanEndpoints(endpoints, requestObservability{RequestID: "req-plan-auto-return"})
+	plan := newRequestEndpointPlanForCurrentWithSkip(available, endpoints, p.GetCurrentEndpointName(), p.isEndpointDeprioritized(p.GetCurrentEndpointName()))
+	if got := plan.Current().Name; got != "A" {
+		t.Fatalf("expected auto_return policy to start on recovered current A, got %q", got)
+	}
+	p.cooldownMu.RLock()
+	_, stillCooled := p.endpointCooldowns["A"]
+	p.cooldownMu.RUnlock()
+	if stillCooled {
+		t.Fatal("expected auto_return policy to clear expired cooldown")
+	}
+}
+
+func TestManualSwitchClearsEndpointCooldown(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.UpdateEndpoints([]config.Endpoint{
+		failoverPolicyTestEndpoint("A", "https://a.example"),
+		failoverPolicyTestEndpoint("B", "https://b.example"),
+	})
+	p := New(cfg, &noopStatsStorage{}, nil, "test-device")
+	p.markEndpointCooldown("B", "quota_exhausted", time.Hour, requestObservability{RequestID: "req-manual-clear"}, 1)
+
+	if err := p.SetCurrentEndpoint("B"); err != nil {
+		t.Fatalf("set current endpoint: %v", err)
+	}
+	p.cooldownMu.RLock()
+	_, stillCooled := p.endpointCooldowns["B"]
+	p.cooldownMu.RUnlock()
+	if stillCooled {
+		t.Fatal("expected manual switch to clear endpoint cooldown")
+	}
+}
+
+func TestCooldownDurationForFailureReasons(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.UpdateFailover(&config.FailoverConfig{
+		RecoveredEndpointPolicy: config.RecoveredEndpointPolicyDeprioritize,
+		Cooldowns: &config.FailoverCooldownConfig{
+			QuotaExhaustedSec:   11,
+			RateLimitedSec:      12,
+			UpstreamErrorSec:    13,
+			NetworkErrorSec:     14,
+			TokenUnavailableSec: 15,
+			ConfigErrorSec:      16,
+		},
+	})
+	p := New(cfg, &noopStatsStorage{}, nil, "test-device")
+
+	cases := map[string]time.Duration{
+		"quota_exhausted":            11 * time.Second,
+		"rate_limited":               12 * time.Second,
+		"upstream_5xx":               13 * time.Second,
+		"retryable_status":           13 * time.Second,
+		"send_request_failed":        14 * time.Second,
+		"no_usable_token":            15 * time.Second,
+		"credential_select_failed":   15 * time.Second,
+		"empty_api_key":              16 * time.Second,
+		"prepare_transformer_failed": 16 * time.Second,
+		"build_request_failed":       16 * time.Second,
+		"non_stream_response_failed": 0,
+	}
+	for reason, want := range cases {
+		if got := p.cooldownDurationForReason(reason, nil); got != want {
+			t.Fatalf("reason %s: expected %s, got %s", reason, want, got)
+		}
+	}
+
+	headers := http.Header{}
+	headers.Set("Retry-After", "42")
+	if got := p.cooldownDurationForReason("rate_limited", headers); got != 42*time.Second {
+		t.Fatalf("expected Retry-After cooldown 42s, got %s", got)
 	}
 }
 

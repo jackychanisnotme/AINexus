@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 	"github.com/lich0821/ccNexus/internal/storage"
 )
@@ -59,7 +60,7 @@ func (h *Handler) handleBasicAuthConfig(w http.ResponseWriter, r *http.Request) 
 		}
 
 		WriteSuccess(w, map[string]interface{}{
-			"message": "Basic Auth configuration updated",
+			"message":  "Basic Auth configuration updated",
 			"enabled":  h.config.BasicAuthEnabled,
 			"username": h.config.BasicAuthUsername,
 		})
@@ -103,14 +104,16 @@ func (h *Handler) getConfig(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, map[string]interface{}{
 		"port":     h.config.GetPort(),
 		"logLevel": h.config.GetLogLevel(),
+		"failover": h.config.GetFailover(),
 	})
 }
 
 // updateConfig updates the full configuration
 func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Port     int `json:"port"`
-		LogLevel int `json:"logLevel"`
+		Port     *int                   `json:"port"`
+		LogLevel *int                   `json:"logLevel"`
+		Failover *config.FailoverConfig `json:"failover"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -119,13 +122,17 @@ func (h *Handler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update port if provided
-	if req.Port > 0 {
-		h.config.UpdatePort(req.Port)
+	if req.Port != nil && *req.Port > 0 {
+		h.config.UpdatePort(*req.Port)
 	}
 
 	// Update log level if provided
-	if req.LogLevel >= 0 {
-		h.config.UpdateLogLevel(req.LogLevel)
+	if req.LogLevel != nil && *req.LogLevel >= 0 {
+		h.config.UpdateLogLevel(*req.LogLevel)
+	}
+
+	if req.Failover != nil {
+		h.config.UpdateFailover(req.Failover)
 	}
 
 	// Save to storage

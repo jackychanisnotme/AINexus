@@ -1,14 +1,13 @@
 package proxy
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
 )
-
-const endpointQuotaExhaustedCooldown = 10 * time.Minute
 
 type endpointCooldown struct {
 	Reason string
@@ -41,8 +40,8 @@ func (p *Proxy) clearEndpointCooldown(endpointName string) {
 	if endpointName == "" {
 		return
 	}
-	p.cooldownMu.Lock()
-	defer p.cooldownMu.Unlock()
+	p.cooldownMu.RLock()
+	defer p.cooldownMu.RUnlock()
 	delete(p.endpointCooldowns, endpointName)
 }
 
@@ -112,6 +111,8 @@ func (p *Proxy) getRequestPlanEndpoints(endpoints []config.Endpoint, obs request
 
 	now := time.Now()
 	available := make([]config.Endpoint, 0, len(endpoints))
+	deprioritized := make([]config.Endpoint, 0)
+	policy := p.recoveredEndpointPolicy()
 
 	p.cooldownMu.Lock()
 	defer p.cooldownMu.Unlock()
@@ -123,8 +124,17 @@ func (p *Proxy) getRequestPlanEndpoints(endpoints []config.Endpoint, obs request
 			continue
 		}
 		if !cooldown.Until.After(now) {
-			delete(p.endpointCooldowns, endpoint.Name)
-			available = append(available, endpoint)
+			if policy == config.RecoveredEndpointPolicyAutoReturn {
+				delete(p.endpointCooldowns, endpoint.Name)
+				available = append(available, endpoint)
+			} else {
+				deprioritized = append(deprioritized, endpoint)
+				logger.Debug("[COOLDOWN] Recovered endpoint deprioritized for request plan: %s %s cooldown_reason=%s",
+					endpoint.Name,
+					requestLogFields(obs, endpoint.Name, 0, 0, cooldown.Reason),
+					sanitizeLogField(cooldown.Reason),
+				)
+			}
 			continue
 		}
 		logger.Debug("[COOLDOWN] Skipping cooled endpoint for request plan: %s remaining=%s %s cooldown_reason=%s",
@@ -135,9 +145,75 @@ func (p *Proxy) getRequestPlanEndpoints(endpoints []config.Endpoint, obs request
 		)
 	}
 
-	if len(available) == 0 {
+	if len(available) == 0 && len(deprioritized) == 0 {
 		logger.Debug("[COOLDOWN] All enabled endpoints are cooled; using full endpoint list %s", requestLogFields(obs, "", 0, 0, "all_endpoints_cooled"))
 		return endpoints
 	}
+	available = append(available, deprioritized...)
 	return available
+}
+
+func (p *Proxy) recoveredEndpointPolicy() string {
+	if p == nil || p.config == nil {
+		return config.RecoveredEndpointPolicyDeprioritize
+	}
+	return p.config.GetFailover().RecoveredEndpointPolicy
+}
+
+func (p *Proxy) isEndpointDeprioritized(endpointName string) bool {
+	if strings.TrimSpace(endpointName) == "" ||
+		p.recoveredEndpointPolicy() != config.RecoveredEndpointPolicyDeprioritize {
+		return false
+	}
+
+	p.cooldownMu.Lock()
+	defer p.cooldownMu.Unlock()
+	cooldown, ok := p.endpointCooldowns[endpointName]
+	return ok && !cooldown.Until.After(time.Now())
+}
+
+func (p *Proxy) markEndpointCooldownForReason(endpointName string, reason string, headers http.Header, obs requestObservability, attemptNumber int) {
+	duration := p.cooldownDurationForReason(reason, headers)
+	if duration <= 0 {
+		return
+	}
+	p.markEndpointCooldown(endpointName, reason, duration, obs, attemptNumber)
+}
+
+func (p *Proxy) cooldownDurationForReason(reason string, headers http.Header) time.Duration {
+	failover := config.DefaultFailoverConfig()
+	if p != nil && p.config != nil {
+		failover = p.config.GetFailover()
+	}
+	cooldowns := failover.Cooldowns
+	if cooldowns == nil {
+		cooldowns = config.DefaultFailoverConfig().Cooldowns
+	}
+
+	switch sanitizeLogField(reason) {
+	case "quota_exhausted":
+		return secondsToDuration(cooldowns.QuotaExhaustedSec)
+	case "rate_limited":
+		if retryAfter := parseRetryAfterHeader(headers.Get("Retry-After")); retryAfter > 0 {
+			return retryAfter
+		}
+		return secondsToDuration(cooldowns.RateLimitedSec)
+	case "upstream_5xx", "retryable_status":
+		return secondsToDuration(cooldowns.UpstreamErrorSec)
+	case "send_request_failed", "transient_network_error":
+		return secondsToDuration(cooldowns.NetworkErrorSec)
+	case "credential_select_failed", "no_usable_token", "credential_refresh_failed":
+		return secondsToDuration(cooldowns.TokenUnavailableSec)
+	case "empty_api_key", "prepare_transformer_failed", "build_request_failed":
+		return secondsToDuration(cooldowns.ConfigErrorSec)
+	default:
+		return 0
+	}
+}
+
+func secondsToDuration(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }

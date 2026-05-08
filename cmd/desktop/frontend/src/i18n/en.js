@@ -233,11 +233,25 @@ export default {
             minimize: 'Minimize to Tray',
             ask: 'Ask Every Time'
         },
-        proxy: 'Proxy Settings',
-        proxyUrl: 'Proxy URL',
-        proxyUrlPlaceholder: 'e.g., http://127.0.0.1:7890 or socks5://127.0.0.1:1080',
-        proxyHelp: 'Configure HTTP/SOCKS5 proxy, leave empty for direct connection',
-        claudeNotification: 'Notification Method',
+	        proxy: 'Proxy Settings',
+	        proxyUrl: 'Proxy URL',
+	        proxyUrlPlaceholder: 'e.g., http://127.0.0.1:7890 or socks5://127.0.0.1:1080',
+	        proxyHelp: 'Configure HTTP/SOCKS5 proxy, leave empty for direct connection',
+	        failover: 'Failover Policy',
+	        failoverHelp: 'Set cooldown seconds to 0 to disable that endpoint cooldown',
+	        failoverPolicies: {
+	            deprioritize: 'Deprioritize recovered endpoints',
+	            autoReturn: 'Auto-return to default endpoint'
+	        },
+	        cooldowns: {
+	            quotaExhausted: 'Quota exhausted (sec)',
+	            rateLimited: 'Rate limited (sec)',
+	            upstreamError: 'Upstream error (sec)',
+	            networkError: 'Network error (sec)',
+	            tokenUnavailable: 'Token unavailable (sec)',
+	            configError: 'Config error (sec)'
+	        },
+	        claudeNotification: 'Notification Method',
         notificationOptions: {
             disabled: 'Disabled',
             toast: 'Toast (Auto-dismiss in 5s)',

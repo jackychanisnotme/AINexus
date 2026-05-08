@@ -31,6 +31,10 @@ func newRequestEndpointPlan(endpoints []config.Endpoint, startIndex int) *reques
 }
 
 func newRequestEndpointPlanForCurrent(available []config.Endpoint, allEnabled []config.Endpoint, currentName string) *requestEndpointPlan {
+	return newRequestEndpointPlanForCurrentWithSkip(available, allEnabled, currentName, false)
+}
+
+func newRequestEndpointPlanForCurrentWithSkip(available []config.Endpoint, allEnabled []config.Endpoint, currentName string, skipCurrent bool) *requestEndpointPlan {
 	if len(available) == 0 {
 		return newRequestEndpointPlan(available, 0)
 	}
@@ -41,13 +45,32 @@ func newRequestEndpointPlanForCurrent(available []config.Endpoint, allEnabled []
 
 	currentIndex := indexEndpointByName(allEnabled, currentName)
 	if currentIndex < 0 {
-		if availableIndex := indexEndpointByName(available, currentName); availableIndex >= 0 {
-			return newRequestEndpointPlan(available, availableIndex)
+		if !skipCurrent {
+			if availableIndex := indexEndpointByName(available, currentName); availableIndex >= 0 {
+				return newRequestEndpointPlan(available, availableIndex)
+			}
 		}
 		return newRequestEndpointPlan(available, 0)
 	}
 
-	for offset := 0; offset < len(allEnabled); offset++ {
+	startOffset := 0
+	if skipCurrent {
+		startOffset = 1
+	}
+	for offset := startOffset; offset < len(allEnabled); offset++ {
+		candidate := allEnabled[(currentIndex+offset)%len(allEnabled)]
+		if availableIndex := indexEndpointByName(available, candidate.Name); availableIndex >= 0 {
+			return newRequestEndpointPlan(available, availableIndex)
+		}
+	}
+
+	if skipCurrent {
+		if availableIndex := indexEndpointByName(available, currentName); availableIndex >= 0 {
+			return newRequestEndpointPlan(available, availableIndex)
+		}
+	}
+
+	for offset := 0; offset < startOffset; offset++ {
 		candidate := allEnabled[(currentIndex+offset)%len(allEnabled)]
 		if availableIndex := indexEndpointByName(available, candidate.Name); availableIndex >= 0 {
 			return newRequestEndpointPlan(available, availableIndex)

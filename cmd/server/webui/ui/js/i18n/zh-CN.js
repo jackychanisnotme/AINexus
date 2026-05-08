@@ -1,10 +1,11 @@
 export default {
     common: {
-        dashboard: '仪表板',
-        endpoints: '端点',
-        statistics: '统计',
-        testing: '测试',
-        toggleTheme: '切换主题',
+	        dashboard: '仪表板',
+	        endpoints: '端点',
+	        statistics: '统计',
+	        testing: '测试',
+	        settings: '设置',
+	        toggleTheme: '切换主题',
         toggleLanguage: '切换语言',
         add: '添加',
         edit: '编辑',
@@ -185,11 +186,31 @@ export default {
         latency: '延迟',
         response: '响应',
         error: '错误',
-        noResponse: '无响应',
-        unknownError: '未知错误',
-        failedToLoadEndpoints: '加载端点失败'
-    },
-    notifications: {
+	        noResponse: '无响应',
+	        unknownError: '未知错误',
+	        failedToLoadEndpoints: '加载端点失败'
+	    },
+	    settings: {
+	        title: '设置',
+	        failoverTitle: '故障转移策略',
+	        recoveredEndpointPolicy: '恢复端点策略',
+	        policies: {
+	            deprioritize: '首选降权',
+	            autoReturn: '自动回切旧行为'
+	        },
+	        cooldowns: {
+	            quotaExhausted: '额度不足冷却（秒）',
+	            rateLimited: '限流冷却（秒）',
+	            upstreamError: '上游错误冷却（秒）',
+	            networkError: '网络错误冷却（秒）',
+	            tokenUnavailable: 'Token 不可用冷却（秒）',
+	            configError: '配置错误冷却（秒）'
+	        },
+	        saved: '设置已保存',
+	        failedToLoad: '加载设置失败',
+	        failedToSave: '保存设置失败'
+	    },
+	    notifications: {
         endpointsReordered: '端点重新排序成功',
         endpointCreated: '端点创建成功',
         endpointUpdated: '端点更新成功',

@@ -781,6 +781,42 @@ export function initUI() {
                         </p>
                     </div>
                     <div class="form-group">
+                        <label>${t('settings.failover')}</label>
+                        <select id="settingsRecoveredEndpointPolicy">
+                            <option value="deprioritize">${t('settings.failoverPolicies.deprioritize')}</option>
+                            <option value="auto_return">${t('settings.failoverPolicies.autoReturn')}</option>
+                        </select>
+                        <p style="color: #666; font-size: 12px; margin-top: 5px;">
+                            ${t('settings.failoverHelp')}
+                        </p>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px;">
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.quotaExhausted')}
+                                <input type="number" min="0" id="settingsCooldownQuotaExhaustedSec" style="margin-top: 4px;">
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.rateLimited')}
+                                <input type="number" min="0" id="settingsCooldownRateLimitedSec" style="margin-top: 4px;">
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.upstreamError')}
+                                <input type="number" min="0" id="settingsCooldownUpstreamErrorSec" style="margin-top: 4px;">
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.networkError')}
+                                <input type="number" min="0" id="settingsCooldownNetworkErrorSec" style="margin-top: 4px;">
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.tokenUnavailable')}
+                                <input type="number" min="0" id="settingsCooldownTokenUnavailableSec" style="margin-top: 4px;">
+                            </label>
+                            <label style="font-size: 12px; color: var(--text-secondary);">
+                                ${t('settings.cooldowns.configError')}
+                                <input type="number" min="0" id="settingsCooldownConfigErrorSec" style="margin-top: 4px;">
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
                         <label><span class="required">*</span>${t('update.autoCheck')}</label>
                         <select id="check-interval">
                             <option value="1">${t('update.everyHour')}</option>

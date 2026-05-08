@@ -136,6 +136,7 @@ func TestRequestLocalFallbackDoesNotAffectNextRequest(t *testing.T) {
 		failoverPolicyTestEndpoint("Primary", primary.URL),
 		failoverPolicyTestEndpoint("Fallback", fallback.URL),
 	}, primary.Client())
+	disableEndpointCooldownsForTest(p)
 
 	recA := issueFailoverPolicyTestRequest(p, "req-a")
 	if recA.Code != http.StatusOK {
@@ -218,6 +219,7 @@ func TestConcurrentRequestLocalFallbackDoesNotAffectOtherRequest(t *testing.T) {
 		failoverPolicyTestEndpoint("Primary", primary.URL),
 		failoverPolicyTestEndpoint("Fallback", fallback.URL),
 	}, primary.Client())
+	disableEndpointCooldownsForTest(p)
 	p.retrySleep = func(time.Duration) {}
 
 	var recA *httptest.ResponseRecorder
@@ -602,4 +604,11 @@ func joinedProxyLogs() string {
 		builder.WriteByte('\n')
 	}
 	return builder.String()
+}
+
+func disableEndpointCooldownsForTest(p *Proxy) {
+	p.config.UpdateFailover(&config.FailoverConfig{
+		RecoveredEndpointPolicy: config.RecoveredEndpointPolicyDeprioritize,
+		Cooldowns:               &config.FailoverCooldownConfig{},
+	})
 }

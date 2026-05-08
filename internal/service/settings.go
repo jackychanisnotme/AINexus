@@ -339,14 +339,15 @@ func (s *SettingsService) SetCodexProxyURL(proxyURL string) error {
 
 // SettingsData represents the settings data for batch save
 type SettingsData struct {
-	CloseWindowBehavior       string `json:"closeWindowBehavior"`
-	ProxyURL                  string `json:"proxyUrl"`
-	Theme                     string `json:"theme"`
-	ThemeAuto                 bool   `json:"themeAuto"`
-	AutoLightTheme            string `json:"autoLightTheme"`
-	AutoDarkTheme             string `json:"autoDarkTheme"`
-	ClaudeNotificationEnabled bool   `json:"claudeNotificationEnabled"`
-	ClaudeNotificationType    string `json:"claudeNotificationType"`
+	CloseWindowBehavior       string                 `json:"closeWindowBehavior"`
+	ProxyURL                  string                 `json:"proxyUrl"`
+	Theme                     string                 `json:"theme"`
+	ThemeAuto                 bool                   `json:"themeAuto"`
+	AutoLightTheme            string                 `json:"autoLightTheme"`
+	AutoDarkTheme             string                 `json:"autoDarkTheme"`
+	ClaudeNotificationEnabled bool                   `json:"claudeNotificationEnabled"`
+	ClaudeNotificationType    string                 `json:"claudeNotificationType"`
+	Failover                  *config.FailoverConfig `json:"failover"`
 }
 
 // SaveSettings saves all settings in a single operation to avoid database lock issues
@@ -399,6 +400,10 @@ func (s *SettingsService) SaveSettings(settingsJSON string) error {
 		return fmt.Errorf("invalid notification type: %s", settings.ClaudeNotificationType)
 	}
 	s.config.UpdateClaudeNotification(settings.ClaudeNotificationEnabled, settings.ClaudeNotificationType)
+
+	if settings.Failover != nil {
+		s.config.UpdateFailover(settings.Failover)
+	}
 
 	// Save to storage only once
 	if s.storage != nil {

@@ -327,6 +327,7 @@ func (p *Proxy) SetCurrentEndpoint(targetName string) error {
 			p.currentIndex = i
 			logger.Info("[MANUAL SWITCH] %s → %s", oldEndpoint.Name, ep.Name)
 			p.mu.Unlock()
+			p.clearEndpointCooldown(ep.Name)
 			p.emitCurrentEndpointChanged(oldEndpoint.Name, ep.Name, "manual_switch")
 			return nil
 		}
@@ -452,13 +453,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if !useSpecificEndpoint {
 		requestEndpoints = p.getRequestPlanEndpoints(endpoints, obs)
 	}
-	requestPlan := newRequestEndpointPlanForCurrent(requestEndpoints, endpoints, currentEndpointName)
+	skipCurrentEndpoint := !useSpecificEndpoint && p.isEndpointDeprioritized(currentEndpointName)
+	requestPlan := newRequestEndpointPlanForCurrentWithSkip(requestEndpoints, endpoints, currentEndpointName, skipCurrentEndpoint)
 	maxRetries := p.computeMaxRetries(requestEndpoints)
 	if useSpecificEndpoint {
 		maxRetries = endpointSlowFailoverAttempts
 	}
 	endpointAttempts := 0
-	advanceForFailure := func(current config.Endpoint, reason string, attemptNumber int) {
+	advanceForFailure := func(current config.Endpoint, reason string, attemptNumber int, headers http.Header) {
+		p.markEndpointCooldownForReason(current.Name, reason, headers, obs, attemptNumber)
 		if !useSpecificEndpoint {
 			p.advanceRequestEndpoint(requestPlan, current, obs, attemptNumber, reason)
 		}
@@ -497,7 +500,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				p.recordEndpointError(endpoint.Name, "credential_select_failed")
 				p.markRequestInactive(endpoint.Name)
 				if endpointAttempts >= endpointFastFailoverAttempts {
-					advanceForFailure(endpoint, "credential_select_failed", attemptNumber)
+					advanceForFailure(endpoint, "credential_select_failed", attemptNumber, nil)
 				}
 				continue
 			}
@@ -506,7 +509,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				p.recordEndpointError(endpoint.Name, "no_usable_token")
 				p.markRequestInactive(endpoint.Name)
 				if endpointAttempts >= endpointFastFailoverAttempts {
-					advanceForFailure(endpoint, "no_usable_token", attemptNumber)
+					advanceForFailure(endpoint, "no_usable_token", attemptNumber, nil)
 				}
 				continue
 			}
@@ -530,7 +533,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "empty_api_key")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "empty_api_key", attemptNumber)
+				advanceForFailure(endpoint, "empty_api_key", attemptNumber, nil)
 			}
 			continue
 		}
@@ -541,7 +544,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "prepare_transformer_failed")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "prepare_transformer_failed", attemptNumber)
+				advanceForFailure(endpoint, "prepare_transformer_failed", attemptNumber, nil)
 			}
 			continue
 		}
@@ -554,7 +557,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "transform_request_failed")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "transform_request_failed", attemptNumber)
+				advanceForFailure(endpoint, "transform_request_failed", attemptNumber, nil)
 			}
 			continue
 		}
@@ -610,7 +613,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "build_request_failed")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "build_request_failed", attemptNumber)
+				advanceForFailure(endpoint, "build_request_failed", attemptNumber, nil)
 			}
 			continue
 		}
@@ -650,7 +653,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, retryReason)
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, retryReason, attemptNumber)
+				advanceForFailure(endpoint, retryReason, attemptNumber, nil)
 			}
 			continue
 		}
@@ -702,7 +705,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "aggregate_streaming_failed")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "aggregate_streaming_failed", attemptNumber)
+				advanceForFailure(endpoint, "aggregate_streaming_failed", attemptNumber, nil)
 			}
 			continue
 		}
@@ -772,7 +775,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, "non_stream_response_failed")
 			p.markRequestInactive(endpoint.Name)
 			if endpointAttempts >= endpointFastFailoverAttempts {
-				advanceForFailure(endpoint, "non_stream_response_failed", attemptNumber)
+				advanceForFailure(endpoint, "non_stream_response_failed", attemptNumber, nil)
 			}
 			continue
 		}
@@ -797,16 +800,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordEndpointError(endpoint.Name, retryReason)
 			p.markRequestInactive(endpoint.Name)
 			shouldFailover := shouldRotateEndpointAfterHTTPFailure(endpointAttempts, resp.StatusCode, errMsg)
-			if retryReason == "quota_exhausted" {
-				p.markEndpointCooldown(endpoint.Name, retryReason, endpointQuotaExhaustedCooldown, obs, attemptNumber)
-			}
 			if retryReason == "rate_limited" && !shouldFailover {
 				backoff := rateLimitBackoffDuration(endpointAttempts, resp.Header)
 				logger.Debug("[%s] Backing off before retry: %s %s retry_reason=%s", endpoint.Name, backoff, requestLogFields(obs, endpoint.Name, attemptNumber, resp.StatusCode, retryReason), retryReason)
 				p.sleepBeforeRetry(backoff)
 			}
 			if shouldFailover {
-				advanceForFailure(endpoint, retryReason, attemptNumber)
+				advanceForFailure(endpoint, retryReason, attemptNumber, resp.Header)
 			}
 			continue
 		}

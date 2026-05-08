@@ -17,6 +17,9 @@ const (
 	AuthModeTokenPool      = "token_pool"
 	AuthModeCodexTokenPool = "codex_token_pool"
 
+	RecoveredEndpointPolicyDeprioritize = "deprioritize"
+	RecoveredEndpointPolicyAutoReturn   = "auto_return"
+
 	ThinkingOff    = "off"
 	ThinkingLow    = "low"
 	ThinkingMedium = "medium"
@@ -187,6 +190,22 @@ type ProxyConfig struct {
 	URL string `json:"url"` // Proxy URL, e.g., http://127.0.0.1:7890 or socks5://127.0.0.1:1080
 }
 
+// FailoverCooldownConfig controls endpoint cooldown durations in seconds.
+type FailoverCooldownConfig struct {
+	QuotaExhaustedSec   int `json:"quotaExhaustedSec"`
+	RateLimitedSec      int `json:"rateLimitedSec"`
+	UpstreamErrorSec    int `json:"upstreamErrorSec"`
+	NetworkErrorSec     int `json:"networkErrorSec"`
+	TokenUnavailableSec int `json:"tokenUnavailableSec"`
+	ConfigErrorSec      int `json:"configErrorSec"`
+}
+
+// FailoverConfig controls request-local fallback and recovered endpoint handling.
+type FailoverConfig struct {
+	RecoveredEndpointPolicy string                  `json:"recoveredEndpointPolicy"`
+	Cooldowns               *FailoverCooldownConfig `json:"cooldowns,omitempty"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	Port                      int             `json:"port"`
@@ -214,7 +233,59 @@ type Config struct {
 	Terminal                  *TerminalConfig `json:"terminal,omitempty"`                  // Terminal launcher config
 	Proxy                     *ProxyConfig    `json:"proxy,omitempty"`                     // HTTP proxy config
 	CodexProxy                *ProxyConfig    `json:"codexProxy,omitempty"`                // Codex dedicated proxy config
+	Failover                  *FailoverConfig `json:"failover,omitempty"`                  // Request fallback and endpoint cooldown config
 	mu                        sync.RWMutex
+}
+
+// DefaultFailoverConfig returns the default request fallback behavior.
+func DefaultFailoverConfig() *FailoverConfig {
+	return &FailoverConfig{
+		RecoveredEndpointPolicy: RecoveredEndpointPolicyDeprioritize,
+		Cooldowns: &FailoverCooldownConfig{
+			QuotaExhaustedSec:   3600,
+			RateLimitedSec:      120,
+			UpstreamErrorSec:    60,
+			NetworkErrorSec:     30,
+			TokenUnavailableSec: 600,
+			ConfigErrorSec:      1800,
+		},
+	}
+}
+
+// NormalizeFailoverConfig returns a sanitized copy with defaults filled in.
+func NormalizeFailoverConfig(failover *FailoverConfig) *FailoverConfig {
+	defaults := DefaultFailoverConfig()
+	if failover == nil {
+		return defaults
+	}
+
+	normalized := &FailoverConfig{
+		RecoveredEndpointPolicy: strings.TrimSpace(failover.RecoveredEndpointPolicy),
+		Cooldowns:               &FailoverCooldownConfig{},
+	}
+	if normalized.RecoveredEndpointPolicy != RecoveredEndpointPolicyAutoReturn &&
+		normalized.RecoveredEndpointPolicy != RecoveredEndpointPolicyDeprioritize {
+		normalized.RecoveredEndpointPolicy = defaults.RecoveredEndpointPolicy
+	}
+
+	*normalized.Cooldowns = *defaults.Cooldowns
+	if failover.Cooldowns != nil {
+		normalized.Cooldowns.QuotaExhaustedSec = normalizeCooldownSeconds(failover.Cooldowns.QuotaExhaustedSec, defaults.Cooldowns.QuotaExhaustedSec)
+		normalized.Cooldowns.RateLimitedSec = normalizeCooldownSeconds(failover.Cooldowns.RateLimitedSec, defaults.Cooldowns.RateLimitedSec)
+		normalized.Cooldowns.UpstreamErrorSec = normalizeCooldownSeconds(failover.Cooldowns.UpstreamErrorSec, defaults.Cooldowns.UpstreamErrorSec)
+		normalized.Cooldowns.NetworkErrorSec = normalizeCooldownSeconds(failover.Cooldowns.NetworkErrorSec, defaults.Cooldowns.NetworkErrorSec)
+		normalized.Cooldowns.TokenUnavailableSec = normalizeCooldownSeconds(failover.Cooldowns.TokenUnavailableSec, defaults.Cooldowns.TokenUnavailableSec)
+		normalized.Cooldowns.ConfigErrorSec = normalizeCooldownSeconds(failover.Cooldowns.ConfigErrorSec, defaults.Cooldowns.ConfigErrorSec)
+	}
+
+	return normalized
+}
+
+func normalizeCooldownSeconds(value int, defaultValue int) int {
+	if value < 0 {
+		return defaultValue
+	}
+	return value
 }
 
 // DefaultConfig returns a default configuration
@@ -244,6 +315,7 @@ func DefaultConfig() *Config {
 			AutoCheck:     true,
 			CheckInterval: 24,
 		},
+		Failover: DefaultFailoverConfig(),
 	}
 }
 
@@ -283,6 +355,8 @@ func (c *Config) Validate() error {
 			)
 		}
 	}
+
+	c.Failover = NormalizeFailoverConfig(c.Failover)
 
 	return nil
 }
@@ -580,6 +654,20 @@ func (c *Config) UpdateCodexProxy(proxy *ProxyConfig) {
 	c.CodexProxy = proxy
 }
 
+// GetFailover returns the fallback configuration (thread-safe).
+func (c *Config) GetFailover() *FailoverConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return NormalizeFailoverConfig(c.Failover)
+}
+
+// UpdateFailover updates the fallback configuration (thread-safe).
+func (c *Config) UpdateFailover(failover *FailoverConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Failover = NormalizeFailoverConfig(failover)
+}
+
 // GetClaudeNotification returns the Claude notification settings (thread-safe)
 func (c *Config) GetClaudeNotification() (enabled bool, notifType string) {
 	c.mu.RLock()
@@ -839,6 +927,40 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 		config.CodexProxy = &ProxyConfig{URL: codexProxyURL}
 	}
 
+	// Load Failover config
+	config.Failover = DefaultFailoverConfig()
+	if policy, err := storage.GetConfig("failover_recoveredEndpointPolicy"); err == nil && policy != "" {
+		config.Failover.RecoveredEndpointPolicy = policy
+	}
+	loadFailoverCooldown := func(key string, apply func(int)) {
+		valueStr, err := storage.GetConfig(key)
+		if err != nil || valueStr == "" {
+			return
+		}
+		if value, err := strconv.Atoi(valueStr); err == nil {
+			apply(value)
+		}
+	}
+	loadFailoverCooldown("failover_cooldown_quotaExhaustedSec", func(value int) {
+		config.Failover.Cooldowns.QuotaExhaustedSec = value
+	})
+	loadFailoverCooldown("failover_cooldown_rateLimitedSec", func(value int) {
+		config.Failover.Cooldowns.RateLimitedSec = value
+	})
+	loadFailoverCooldown("failover_cooldown_upstreamErrorSec", func(value int) {
+		config.Failover.Cooldowns.UpstreamErrorSec = value
+	})
+	loadFailoverCooldown("failover_cooldown_networkErrorSec", func(value int) {
+		config.Failover.Cooldowns.NetworkErrorSec = value
+	})
+	loadFailoverCooldown("failover_cooldown_tokenUnavailableSec", func(value int) {
+		config.Failover.Cooldowns.TokenUnavailableSec = value
+	})
+	loadFailoverCooldown("failover_cooldown_configErrorSec", func(value int) {
+		config.Failover.Cooldowns.ConfigErrorSec = value
+	})
+	config.Failover = NormalizeFailoverConfig(config.Failover)
+
 	// Load Claude notification config
 	if enabledStr, err := storage.GetConfig("claude_notification_enabled"); err == nil && enabledStr != "" {
 		config.ClaudeNotificationEnabled = enabledStr == "true"
@@ -1077,6 +1199,30 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 	}
 	if err := storage.SetConfig("codex_proxy_url", codexProxyURL); err != nil {
 		return fmt.Errorf("failed to save codex_proxy_url config: %w", err)
+	}
+
+	// Save Failover config
+	failover := NormalizeFailoverConfig(c.Failover)
+	if err := storage.SetConfig("failover_recoveredEndpointPolicy", failover.RecoveredEndpointPolicy); err != nil {
+		return fmt.Errorf("failed to save failover_recoveredEndpointPolicy config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_quotaExhaustedSec", strconv.Itoa(failover.Cooldowns.QuotaExhaustedSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_quotaExhaustedSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_rateLimitedSec", strconv.Itoa(failover.Cooldowns.RateLimitedSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_rateLimitedSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_upstreamErrorSec", strconv.Itoa(failover.Cooldowns.UpstreamErrorSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_upstreamErrorSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_networkErrorSec", strconv.Itoa(failover.Cooldowns.NetworkErrorSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_networkErrorSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_tokenUnavailableSec", strconv.Itoa(failover.Cooldowns.TokenUnavailableSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_tokenUnavailableSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_cooldown_configErrorSec", strconv.Itoa(failover.Cooldowns.ConfigErrorSec)); err != nil {
+		return fmt.Errorf("failed to save failover_cooldown_configErrorSec config: %w", err)
 	}
 
 	// Save Claude notification config

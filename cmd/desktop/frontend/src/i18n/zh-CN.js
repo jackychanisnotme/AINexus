@@ -233,11 +233,25 @@ export default {
             minimize: '最小化到托盘',
             ask: '每次询问'
         },
-        proxy: '代理设置',
-        proxyUrl: '代理地址',
-        proxyUrlPlaceholder: '例如：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',
-        proxyHelp: '配置 HTTP/SOCKS5 代理，留空则直连',
-        claudeNotification: '通知方式',
+	        proxy: '代理设置',
+	        proxyUrl: '代理地址',
+	        proxyUrlPlaceholder: '例如：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',
+	        proxyHelp: '配置 HTTP/SOCKS5 代理，留空则直连',
+	        failover: '故障转移策略',
+	        failoverHelp: '冷却秒数填 0 表示禁用该类端点冷却',
+	        failoverPolicies: {
+	            deprioritize: '首选降权',
+	            autoReturn: '自动回切旧行为'
+	        },
+	        cooldowns: {
+	            quotaExhausted: '额度不足（秒）',
+	            rateLimited: '限流（秒）',
+	            upstreamError: '上游错误（秒）',
+	            networkError: '网络错误（秒）',
+	            tokenUnavailable: 'Token 不可用（秒）',
+	            configError: '配置错误（秒）'
+	        },
+	        claudeNotification: '通知方式',
         notificationOptions: {
             disabled: '关闭通知',
             toast: '卡片通知（5秒自动消失）',

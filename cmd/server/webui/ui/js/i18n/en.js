@@ -1,10 +1,11 @@
 export default {
     common: {
-        dashboard: 'Dashboard',
-        endpoints: 'Endpoints',
-        statistics: 'Statistics',
-        testing: 'Testing',
-        toggleTheme: 'Toggle theme',
+	        dashboard: 'Dashboard',
+	        endpoints: 'Endpoints',
+	        statistics: 'Statistics',
+	        testing: 'Testing',
+	        settings: 'Settings',
+	        toggleTheme: 'Toggle theme',
         toggleLanguage: 'Switch language',
         add: 'Add',
         edit: 'Edit',
@@ -185,11 +186,31 @@ export default {
         latency: 'Latency',
         response: 'Response',
         error: 'Error',
-        noResponse: 'No response',
-        unknownError: 'Unknown error',
-        failedToLoadEndpoints: 'Failed to load endpoints'
-    },
-    notifications: {
+	        noResponse: 'No response',
+	        unknownError: 'Unknown error',
+	        failedToLoadEndpoints: 'Failed to load endpoints'
+	    },
+	    settings: {
+	        title: 'Settings',
+	        failoverTitle: 'Failover Policy',
+	        recoveredEndpointPolicy: 'Recovered Endpoint Policy',
+	        policies: {
+	            deprioritize: 'Deprioritize recovered endpoints',
+	            autoReturn: 'Auto-return to default endpoint'
+	        },
+	        cooldowns: {
+	            quotaExhausted: 'Quota exhausted cooldown (sec)',
+	            rateLimited: 'Rate limit cooldown (sec)',
+	            upstreamError: 'Upstream error cooldown (sec)',
+	            networkError: 'Network error cooldown (sec)',
+	            tokenUnavailable: 'Token unavailable cooldown (sec)',
+	            configError: 'Config error cooldown (sec)'
+	        },
+	        saved: 'Settings saved',
+	        failedToLoad: 'Failed to load settings',
+	        failedToSave: 'Failed to save settings'
+	    },
+	    notifications: {
         endpointsReordered: 'Endpoints reordered successfully',
         endpointCreated: 'Endpoint created successfully',
         endpointUpdated: 'Endpoint updated successfully',

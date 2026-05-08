@@ -8,6 +8,66 @@ let autoThemeIntervalId = null;
 // 记录当前已应用的主题，用于避免重复初始化
 let currentAppliedTheme = null;
 
+const defaultFailoverSettings = {
+    recoveredEndpointPolicy: 'deprioritize',
+    cooldowns: {
+        quotaExhaustedSec: 3600,
+        rateLimitedSec: 120,
+        upstreamErrorSec: 60,
+        networkErrorSec: 30,
+        tokenUnavailableSec: 600,
+        configErrorSec: 1800
+    }
+};
+
+function normalizeFailoverSettings(config) {
+    const failover = config?.failover || {};
+    const cooldowns = failover.cooldowns || {};
+    return {
+        recoveredEndpointPolicy: failover.recoveredEndpointPolicy || defaultFailoverSettings.recoveredEndpointPolicy,
+        cooldowns: {
+            quotaExhaustedSec: Number.isFinite(Number(cooldowns.quotaExhaustedSec)) ? Number(cooldowns.quotaExhaustedSec) : defaultFailoverSettings.cooldowns.quotaExhaustedSec,
+            rateLimitedSec: Number.isFinite(Number(cooldowns.rateLimitedSec)) ? Number(cooldowns.rateLimitedSec) : defaultFailoverSettings.cooldowns.rateLimitedSec,
+            upstreamErrorSec: Number.isFinite(Number(cooldowns.upstreamErrorSec)) ? Number(cooldowns.upstreamErrorSec) : defaultFailoverSettings.cooldowns.upstreamErrorSec,
+            networkErrorSec: Number.isFinite(Number(cooldowns.networkErrorSec)) ? Number(cooldowns.networkErrorSec) : defaultFailoverSettings.cooldowns.networkErrorSec,
+            tokenUnavailableSec: Number.isFinite(Number(cooldowns.tokenUnavailableSec)) ? Number(cooldowns.tokenUnavailableSec) : defaultFailoverSettings.cooldowns.tokenUnavailableSec,
+            configErrorSec: Number.isFinite(Number(cooldowns.configErrorSec)) ? Number(cooldowns.configErrorSec) : defaultFailoverSettings.cooldowns.configErrorSec
+        }
+    };
+}
+
+function setFailoverControlValues(config) {
+    const failover = normalizeFailoverSettings(config);
+    const policySelect = document.getElementById('settingsRecoveredEndpointPolicy');
+    if (policySelect) {
+        policySelect.value = failover.recoveredEndpointPolicy;
+    }
+    Object.entries(failover.cooldowns).forEach(([key, value]) => {
+        const input = document.getElementById(`settingsCooldown${key.charAt(0).toUpperCase()}${key.slice(1)}`);
+        if (input) {
+            input.value = Math.max(0, Number(value) || 0);
+        }
+    });
+}
+
+function collectFailoverSettings() {
+    const readSeconds = (id) => {
+        const value = Number.parseInt(document.getElementById(id)?.value || '0', 10);
+        return Number.isFinite(value) && value > 0 ? value : 0;
+    };
+    return {
+        recoveredEndpointPolicy: document.getElementById('settingsRecoveredEndpointPolicy')?.value || defaultFailoverSettings.recoveredEndpointPolicy,
+        cooldowns: {
+            quotaExhaustedSec: readSeconds('settingsCooldownQuotaExhaustedSec'),
+            rateLimitedSec: readSeconds('settingsCooldownRateLimitedSec'),
+            upstreamErrorSec: readSeconds('settingsCooldownUpstreamErrorSec'),
+            networkErrorSec: readSeconds('settingsCooldownNetworkErrorSec'),
+            tokenUnavailableSec: readSeconds('settingsCooldownTokenUnavailableSec'),
+            configErrorSec: readSeconds('settingsCooldownConfigErrorSec')
+        }
+    };
+}
+
 // Apply theme to body element
 export function applyTheme(theme) {
     // 如果主题没有变化，直接返回
@@ -222,6 +282,8 @@ async function loadCurrentSettings() {
         if (notificationTypeSelect) {
             notificationTypeSelect.value = claudeNotificationType;
         }
+
+        setFailoverControlValues(config);
     } catch (error) {
         console.error('Failed to load settings:', error);
     }
@@ -309,6 +371,7 @@ export async function saveSettings() {
         const theme = document.getElementById('settingsTheme').value;
         const themeAuto = document.getElementById('settingsThemeAuto').checked;
         const proxyUrl = document.getElementById('settingsProxyUrl').value.trim();
+        const failover = collectFailoverSettings();
 
         // Get Claude notification settings
         const claudeNotificationType = document.getElementById('settingsNotificationType').value;
@@ -325,7 +388,8 @@ export async function saveSettings() {
             theme: theme,
             themeAuto: themeAuto,
             claudeNotificationEnabled: claudeNotificationEnabled,
-            claudeNotificationType: claudeNotificationType
+            claudeNotificationType: claudeNotificationType,
+            failover: failover
         };
         await window.go.main.App.SaveSettings(JSON.stringify(settings));
 
