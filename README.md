@@ -4,33 +4,36 @@
   <img src="docs/images/ccNexus.svg" alt="Claude Code & Codex CLI 智能端点轮换代理" width="720" />
 </p>
 
-[![构建状态](https://github.com/lich0821/ccNexus/workflows/Build%20and%20Release/badge.svg)](https://github.com/lich0821/ccNexus/actions)
+[![构建状态](https://github.com/jackychanisnotme/ccNexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/ccNexus/actions)
+[![最新版本](https://img.shields.io/github/v/release/jackychanisnotme/ccNexus?label=release)](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 [![许可证: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go 版本](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![Go 版本](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-blue)](https://wails.io/)
 
 [English](docs/README_EN.md) | [简体中文](README.md)
 
 </div>
 
-> [!NOTE]
-> **本 fork 分支说明**：`upload/source-4a7ee-20260506` 同步自本地源码包 `ccNexus-native-compatible-fallback-source-4a7ee-20260506-211002.zip`，对应上游基线 `8f503ba`，用于保存 native-compatible fallback 版本源码。
+ccNexus 是一个面向 Claude Code、Codex CLI 和 OpenAI 兼容客户端的本地 API 中枢。它把多个上游模型端点统一成一个稳定入口，负责端点轮换、格式转换、Token Pool、故障转移、统计监控和备份同步。
+
+> [!IMPORTANT]
+> 当前仓库维护 native-compatible fallback 版本，重点增强 Codex CLI / OpenAI Responses API / DeepSeek / Kimi 等兼容场景。
 >
-> - 源码包 SHA256：`d0908ad2238a9986ee87b9482b2b29915310820aaf53b85f3336167cc2aee5f8`
-> - 源码快照提交：`d500af99b1480eb1c63e9e656d780d4249886dd6`
-> - 对比 master：<https://github.com/jackychanisnotme/ccNexus/compare/master...upload%2Fsource-4a7ee-20260506>
+> 最新发布：[`native-compatible-fallback-20260508-3b7560d`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
 ## 功能特性
 
-- **多端点轮换**：自动故障转移，一个失败自动切换下一个
-- **API 格式转换**：支持 Claude、OpenAI、Gemini 格式互转
-- **Codex Token Pool**：支持批量导入 `access_token/refresh_token`，自动轮换、自动刷新、失效隔离与状态管理
-- **Token Pool 使用统计**：单条凭证请求/错误/Token 统计，支持快捷查看
-- **实时统计**：事件驱动的零延迟统计更新，支持今日/昨日/本周/本月四周期快速切换
-- **端点筛选**：按类型、可用性、启用状态多选筛选，快速定位端点
-- **WebDAV 同步**：多设备间同步配置和数据
-- **跨平台**：Windows、macOS、Linux
-- **[Docker](docs/README_DOCKER.md)**：纯后端 HTTP 服务，并提供容器化运行
+- **统一代理入口**：Claude Code、Codex CLI、OpenAI Chat/Responses 兼容客户端都可以接入同一个本地地址
+- **多端点轮换与故障转移**：按顺序轮换可用端点，失败自动跳过并切换，降低单个上游异常对工作流的影响
+- **多协议格式转换**：支持 Claude、OpenAI Chat、OpenAI Responses、Gemini、DeepSeek、Kimi/Moonshot 等格式互转
+- **Codex Token Pool**：批量导入 `access_token/refresh_token`，自动轮换、401 后刷新、失效隔离，并固定适配 ChatGPT Codex 后端
+- **Token Pool 额度与用量统计**：捕获 Codex 额度快照，按单条凭证展示请求数、错误数、Token 用量和最近使用状态
+- **端点级推理控制**：为支持的端点配置 `low` / `medium` / `high` / `xhigh` 推理强度，也可显式关闭上游 thinking
+- **上游强制流式兼容**：当上游拒绝非流式请求时，可强制使用流式上游并为非流式客户端聚合结果
+- **模型聚合与兼容接口**：提供 `/v1/models`、`/models`、`/api/tags`、`/version`、`/props`、`/health`、`/stats` 等接口，便于客户端探测和监控
+- **实时统计与可视化**：事件驱动更新，支持今日/昨日/本周/本月快速切换，并可按端点、凭证维度查看
+- **桌面端 + 服务器端**：Wails 桌面应用适合本机使用，`cmd/server` 无头模式适合服务器、NAS 或 Docker 部署
+- **备份同步**：支持 WebDAV、本地备份和 S3 兼容存储，便于多设备迁移配置与统计数据
 
 <table>
   <tr>
@@ -43,22 +46,35 @@
 
 ### 1. 下载安装
 
-[下载最新版本](https://github.com/lich0821/ccNexus/releases/latest)
+[下载当前 fork 最新版本](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
-- **Windows**: 解压后运行 `ccNexus.exe`
-- **macOS**: 移动到「应用程序」，首次运行右键点击 → 打开
-- **Linux**: `tar -xzf ccNexus-linux-amd64.tar.gz && ./ccNexus`
+- **macOS**：下载 `.zip` 后解压，将 `ccNexus.app` 移动到「应用程序」，首次运行右键点击 → 打开
+- **Windows / Linux**：可从源码构建，或使用服务器模式/Docker 部署
+- **服务器模式**：`cd cmd/server && go run main.go`
 
 ### 2. 添加端点
 
-点击「添加端点」，填写 API 地址、密钥、选择转换器（claude/openai/gemini/openai2/deepseek/kimi）。
+点击「添加端点」，填写 API 地址、密钥、认证方式、转换器和目标模型。
+
+常用转换器：
+- `claude`：Claude / Anthropic 兼容接口
+- `openai`：OpenAI Chat Completions 兼容接口
+- `openai2`：OpenAI Responses API，推荐给 Codex CLI
+- `gemini`：Google Gemini
+- `deepseek`：DeepSeek Chat 兼容接口
+- `kimi`：Kimi / Moonshot 兼容接口
 
 如需使用 Codex Token Pool：
 - 认证方式选择 `Codex Token Pool`
 - 在 Token Pool 页面导入一批 token JSON（支持 `access_token` + `refresh_token`）
-- 系统会自动进行 token 轮换、401 后刷新与状态管理（active/expiring/need_refresh/invalid 等）
+- 系统会自动设置上游地址与 `openai2` 转换器，并处理 token 轮换、401 后刷新、额度快照和状态管理
 
-### 3. 配置 CC
+可选增强：
+- 对支持 reasoning 的端点启用「推理」，选择推理强度
+- 上游只接受流式时，启用「上游强制流式」
+- 点击模型选择旁的拉取按钮，快速获取上游模型列表
+
+### 3. 配置客户端
 
 #### Claude Code
 `~/.claude/settings.json`
@@ -75,7 +91,7 @@
 ```
 
 #### Codex CLI
-只需要配置 `~/.codex/config.toml`：
+推荐使用 Responses API：
 ```toml
 model_provider = "ccNexus"
 model = "gpt-5-codex"
@@ -89,7 +105,16 @@ wire_api = "responses"  # 或 "chat"
 # 其他配置
 ```
 
-`~/.codex/auth.json` 可以忽略了。
+`~/.codex/auth.json` 可以忽略，认证由 ccNexus 端点或 Token Pool 负责。
+
+## 运行模式
+
+| 模式 | 入口 | 适合场景 |
+|------|------|----------|
+| 桌面模式 | `cmd/desktop` | 本机 GUI、托盘运行、可视化端点和 Token Pool 管理 |
+| 服务器模式 | `cmd/server` | 远程服务器、NAS、Docker、无头 API 代理 |
+
+服务器模式支持 `CCNEXUS_PORT`、`CCNEXUS_LOG_LEVEL`、`CCNEXUS_DB_PATH`、`CCNEXUS_DATA_DIR`、`CCNEXUS_BASIC_AUTH_USERNAME`、`CCNEXUS_BASIC_AUTH_PASSWORD` 等环境变量。
 
 ## 文档
 

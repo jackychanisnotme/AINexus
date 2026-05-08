@@ -4,25 +4,36 @@
   <img src="images/ccNexus.svg" alt="Claude Code & Codex CLI 智能端点轮换代理" width="720" />
 </p>
 
-[![Build Status](https://github.com/lich0821/ccNexus/workflows/Build%20and%20Release/badge.svg)](https://github.com/lich0821/ccNexus/actions)
+[![Build Status](https://github.com/jackychanisnotme/ccNexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/ccNexus/actions)
+[![Latest Release](https://img.shields.io/github/v/release/jackychanisnotme/ccNexus?label=release)](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-blue)](https://wails.io/)
 
 [English](README_EN.md) | [简体中文](../README.md)
 
 </div>
 
+ccNexus is a local API hub for Claude Code, Codex CLI, and OpenAI-compatible clients. It exposes one stable local endpoint while handling upstream rotation, request/response conversion, token pools, failover, live statistics, and backup sync.
+
+> [!IMPORTANT]
+> This fork maintains the native-compatible fallback line, with extra compatibility for Codex CLI, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
+>
+> Latest release: [`native-compatible-fallback-20260508-3b7560d`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+
 ## Features
 
-- **Multi-Endpoint Rotation**: Automatic failover, switches to next endpoint on failure
-- **API Format Conversion**: Supports Claude, OpenAI, Gemini format conversion
-- **Codex Token Pool**: Bulk import `access_token/refresh_token` credentials with auto-rotation, auto-refresh, invalid-token isolation, and status management
-- **Token Pool Usage Insights**: Per-credential requests/errors/token counts with quick view
-- **Real-time Statistics**: Event-driven zero-latency stats updates with instant switching between 4 periods (daily/yesterday/weekly/monthly)
-- **Endpoint Filtering**: Multi-select filtering by type, availability, and status for quick endpoint location
-- **WebDAV Sync**: Sync configuration and data across devices
-- **Cross-Platform**: Windows, macOS, Linux
+- **One Local Gateway**: Connect Claude Code, Codex CLI, OpenAI Chat/Responses-compatible clients, and model tools to one local base URL
+- **Endpoint Rotation and Failover**: Rotate across enabled endpoints and skip failing upstreams automatically
+- **Protocol Conversion**: Convert between Claude, OpenAI Chat, OpenAI Responses, Gemini, DeepSeek, and Kimi/Moonshot formats
+- **Codex Token Pool**: Bulk import `access_token/refresh_token`, rotate credentials, refresh after 401s, isolate invalid tokens, and target the ChatGPT Codex backend automatically
+- **Credential Usage and Rate Insights**: Capture Codex quota snapshots and show per-credential requests, errors, token usage, and recent activity
+- **Endpoint-Level Reasoning Control**: Set `low` / `medium` / `high` / `xhigh` reasoning effort, or explicitly disable upstream thinking where supported
+- **Forced Streaming Upstream Mode**: Use streaming upstream requests for providers that reject non-streaming calls while aggregating output for non-streaming clients
+- **Model and Compatibility APIs**: Serve `/v1/models`, `/models`, `/api/tags`, `/version`, `/props`, `/health`, and `/stats` for client discovery and monitoring
+- **Live Statistics**: Event-driven usage updates with today/yesterday/week/month views
+- **Desktop and Server Modes**: Use the Wails desktop app locally, or run `cmd/server` headlessly on a server, NAS, or Docker host
+- **Backup and Sync**: Support WebDAV, local backups, and S3-compatible storage
 
 <table>
   <tr>
@@ -35,22 +46,35 @@
 
 ### 1. Download and Install
 
-[Download Latest Release](https://github.com/lich0821/ccNexus/releases/latest)
+[Download the latest release from this fork](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
-- **Windows**: Extract and run `ccNexus.exe`
-- **macOS**: Move to Applications, right-click → Open for first run
-- **Linux**: `tar -xzf ccNexus-linux-amd64.tar.gz && ./ccNexus`
+- **macOS**: Extract the `.zip`, move `ccNexus.app` to Applications, then right-click → Open for the first run
+- **Windows / Linux**: Build from source, or use server mode/Docker
+- **Server mode**: `cd cmd/server && go run main.go`
 
 ### 2. Add Endpoints
 
-Click "Add Endpoint", fill in API URL, key, and select transformer (claude/openai/gemini/openai2/deepseek/kimi).
+Click "Add Endpoint", then fill in the API URL, key, auth mode, transformer, and target model.
+
+Common transformers:
+- `claude`: Claude / Anthropic-compatible APIs
+- `openai`: OpenAI Chat Completions-compatible APIs
+- `openai2`: OpenAI Responses API, recommended for Codex CLI
+- `gemini`: Google Gemini
+- `deepseek`: DeepSeek Chat-compatible APIs
+- `kimi`: Kimi / Moonshot-compatible APIs
 
 For Codex Token Pool mode:
 - Set auth mode to `Codex Token Pool`
 - Import token JSON records in the Token Pool page (`access_token` + `refresh_token`)
-- ccNexus will handle token rotation, 401-triggered refresh, and lifecycle statuses (active/expiring/need_refresh/invalid, etc.)
+- ccNexus will lock the upstream URL and `openai2` transformer, then handle token rotation, 401-triggered refresh, quota snapshots, and lifecycle statuses
 
-### 3. Configure CC
+Optional enhancements:
+- Enable endpoint reasoning and select the effort level for providers that support it
+- Enable forced streaming when an upstream only accepts streaming requests
+- Use the model fetch button next to the model field to pull upstream model IDs
+
+### 3. Configure Clients
 
 #### Claude Code
 `~/.claude/settings.json`
@@ -67,7 +91,7 @@ For Codex Token Pool mode:
 ```
 
 #### Codex CLI
-Just configure `~/.codex/config.toml`:
+Responses API is recommended:
 ```toml
 model_provider = "ccNexus"
 model = "gpt-5-codex"
@@ -81,22 +105,16 @@ wire_api = "responses"  # or "chat"
 # Other settings
 ```
 
-`~/.codex/auth.json` can be ignored.
+`~/.codex/auth.json` can be ignored because ccNexus handles endpoint or Token Pool authentication.
 
-## Get Help
+## Runtime Modes
 
-<table>
-  <tr>
-    <td align="center"><img src="https://gitee.com/hea7en/images/raw/master/group/chat.png" alt="WeChat Group" width="200"></td>
-    <td align="center"><img src="../cmd/desktop/frontend/public/WeChat.jpg" alt="Official Account" width="200"></td>
-    <td align="center"><img src="../cmd/desktop/frontend/public/ME.png" alt="Personal WeChat" width="200"></td>
-  </tr>
-  <tr>
-    <td align="center">Join group for feedback</td>
-    <td align="center">Official Account</td>
-    <td align="center">Add me if group expired</td>
-  </tr>
-</table>
+| Mode | Entry | Best For |
+|------|-------|----------|
+| Desktop | `cmd/desktop` | Local GUI, tray app, visual endpoint and Token Pool management |
+| Server | `cmd/server` | Remote servers, NAS, Docker, and headless HTTP proxy usage |
+
+Server mode supports `CCNEXUS_PORT`, `CCNEXUS_LOG_LEVEL`, `CCNEXUS_DB_PATH`, `CCNEXUS_DATA_DIR`, `CCNEXUS_BASIC_AUTH_USERNAME`, and `CCNEXUS_BASIC_AUTH_PASSWORD`.
 
 ## Documentation
 
