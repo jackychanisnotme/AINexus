@@ -2,6 +2,7 @@ package convert
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/lich0821/ccNexus/internal/transformer"
@@ -170,6 +171,100 @@ func TestOpenAI2ReqToOpenAIPreservesReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestOpenAI2ReqToOpenAIPreservesReasoningInput(t *testing.T) {
+	openai2Req := `{
+		"model":"deepseek-v4-pro",
+		"stream":false,
+		"input":[
+			{"type":"reasoning","summary":[{"type":"summary_text","text":"reason first"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+		]
+	}`
+
+	reqBytes, err := OpenAI2ReqToOpenAI([]byte(openai2Req), "deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("OpenAI2ReqToOpenAI failed: %v", err)
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(reqBytes, &req); err != nil {
+		t.Fatalf("unmarshal transformed req failed: %v", err)
+	}
+	messages := req["messages"].([]interface{})
+	assistant := messages[0].(map[string]interface{})
+	if assistant["reasoning_content"] != "reason first" {
+		t.Fatalf("expected assistant reasoning_content, got %#v", assistant["reasoning_content"])
+	}
+	if assistant["content"] != "answer" {
+		t.Fatalf("expected assistant content=answer, got %#v", assistant["content"])
+	}
+}
+
+func TestOpenAIRespToOpenAI2PreservesReasoningContent(t *testing.T) {
+	openaiResp := `{
+		"id":"chatcmpl_123",
+		"object":"chat.completion",
+		"model":"deepseek-v4-pro",
+		"choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"reasoned","content":"answer"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}
+	}`
+
+	respBytes, err := OpenAIRespToOpenAI2([]byte(openaiResp))
+	if err != nil {
+		t.Fatalf("OpenAIRespToOpenAI2 failed: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		t.Fatalf("unmarshal transformed response failed: %v", err)
+	}
+	output := resp["output"].([]interface{})
+	reasoning := output[0].(map[string]interface{})
+	if reasoning["type"] != "reasoning" {
+		t.Fatalf("expected first output item to be reasoning, got %#v", reasoning)
+	}
+	summary := reasoning["summary"].([]interface{})[0].(map[string]interface{})
+	if summary["text"] != "reasoned" {
+		t.Fatalf("expected reasoning summary text, got %#v", summary["text"])
+	}
+	message := output[1].(map[string]interface{})
+	if message["type"] != "message" {
+		t.Fatalf("expected second output item to be message, got %#v", message)
+	}
+}
+
+func TestOpenAI2RespToOpenAIPreservesReasoningContent(t *testing.T) {
+	openai2Resp := `{
+		"id":"resp_123",
+		"object":"response",
+		"status":"completed",
+		"output":[
+			{"type":"reasoning","summary":[{"type":"summary_text","text":"reasoned"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}
+		],
+		"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}
+	}`
+
+	respBytes, err := OpenAI2RespToOpenAI([]byte(openai2Resp), "deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("OpenAI2RespToOpenAI failed: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		t.Fatalf("unmarshal transformed response failed: %v", err)
+	}
+	choice := resp["choices"].([]interface{})[0].(map[string]interface{})
+	message := choice["message"].(map[string]interface{})
+	if message["reasoning_content"] != "reasoned" {
+		t.Fatalf("expected reasoning_content=reasoned, got %#v", message["reasoning_content"])
+	}
+	if message["content"] != "answer" {
+		t.Fatalf("expected content=answer, got %#v", message["content"])
+	}
+}
+
 func TestOpenAI2RespToOpenAIPreservesTotalTokens(t *testing.T) {
 	openai2Resp := `{
 		"id":"resp_123",
@@ -236,5 +331,59 @@ func TestOpenAI2StreamToOpenAIIncludesUsageOnCompleted(t *testing.T) {
 	}
 	if usage["total_tokens"] != float64(42) {
 		t.Fatalf("expected total_tokens=42, got %#v", usage["total_tokens"])
+	}
+}
+
+func TestOpenAIStreamToOpenAI2PreservesReasoningDelta(t *testing.T) {
+	ctx := transformer.NewStreamContext()
+
+	chunk := `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":null}]}`
+	out, err := OpenAIStreamToOpenAI2([]byte(chunk), ctx)
+	if err != nil {
+		t.Fatalf("OpenAIStreamToOpenAI2 failed: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected reasoning stream events, got nil")
+	}
+	events := string(out)
+	if !strings.Contains(events, `"type":"response.reasoning_text.delta"`) {
+		t.Fatalf("expected reasoning_text delta event, got %s", events)
+	}
+	if !strings.Contains(events, `"delta":"think"`) {
+		t.Fatalf("expected reasoning delta text, got %s", events)
+	}
+
+	finish := `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	out, err = OpenAIStreamToOpenAI2([]byte(finish), ctx)
+	if err != nil {
+		t.Fatalf("finish event failed: %v", err)
+	}
+	if !strings.Contains(string(out), `"type":"response.reasoning_text.done"`) {
+		t.Fatalf("expected reasoning_text done event, got %s", string(out))
+	}
+}
+
+func TestOpenAI2StreamToOpenAIPreservesReasoningDelta(t *testing.T) {
+	ctx := transformer.NewStreamContext()
+	ctx.MessageID = "resp_1"
+
+	event := `data: {"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"think"}`
+	out, err := OpenAI2StreamToOpenAI([]byte(event), ctx, "deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("OpenAI2StreamToOpenAI failed: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected OpenAI reasoning chunk, got nil")
+	}
+
+	_, jsonData := parseSSE(out)
+	var chunk map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonData), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk failed: %v, raw=%s", err, jsonData)
+	}
+	choice := chunk["choices"].([]interface{})[0].(map[string]interface{})
+	delta := choice["delta"].(map[string]interface{})
+	if delta["reasoning_content"] != "think" {
+		t.Fatalf("expected reasoning_content=think, got %#v", delta["reasoning_content"])
 	}
 }

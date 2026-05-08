@@ -10,6 +10,97 @@ const AUTH_MODE_CODEX_TOKEN_POOL = 'codex_token_pool';
 const CODEX_FIXED_API_URL = 'https://chatgpt.com/backend-api/codex';
 const CODEX_FIXED_TRANSFORMER = 'openai2';
 
+function normalizeThinkingForTransformer(transformer, value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (transformer === 'deepseek') {
+        if (!normalized || normalized === 'default' || normalized === 'auto' || normalized === 'inherit') {
+            return '';
+        }
+        if (normalized === 'off') {
+            return 'off';
+        }
+        if (normalized === 'xhigh' || normalized === 'max') {
+            return 'xhigh';
+        }
+        if (['low', 'medium', 'high'].includes(normalized)) {
+            return 'high';
+        }
+        return '';
+    }
+    if (!normalized || normalized === 'off' || normalized === 'default' || normalized === 'auto' || normalized === 'inherit') {
+        return 'off';
+    }
+    if (['low', 'medium', 'high', 'xhigh'].includes(normalized)) {
+        return normalized;
+    }
+    return 'off';
+}
+
+function renderThinkingOptions(transformer, value) {
+    const select = document.getElementById('endpointThinking');
+    if (!select) {
+        return;
+    }
+
+    const normalized = normalizeThinkingForTransformer(transformer, value);
+    const selected = normalized === 'off' ? (transformer === 'deepseek' ? '' : 'medium') : normalized;
+    const options = transformer === 'deepseek'
+        ? [
+            ['', t('modal.thinkingProviderDefault')],
+            ['high', t('modal.thinkingHigh')],
+            ['xhigh', t('modal.thinkingMax')]
+        ]
+        : [
+            ['low', t('modal.thinkingLow')],
+            ['medium', t('modal.thinkingMedium')],
+            ['high', t('modal.thinkingHigh')],
+            ['xhigh', t('modal.thinkingXHigh')]
+        ];
+
+    select.innerHTML = options.map(([optionValue, label]) =>
+        `<option value="${optionValue}" ${optionValue === selected ? 'selected' : ''}>${label}</option>`
+    ).join('');
+}
+
+function setThinkingControlValue(value) {
+    const transformer = document.getElementById('endpointTransformer')?.value || 'claude';
+    const enabled = document.getElementById('endpointThinkingEnabled');
+    const select = document.getElementById('endpointThinking');
+    const help = document.getElementById('thinkingHelpText');
+    const normalized = normalizeThinkingForTransformer(transformer, value);
+
+    renderThinkingOptions(transformer, normalized);
+    if (enabled) {
+        enabled.checked = normalized !== 'off';
+    }
+    if (select) {
+        select.disabled = normalized === 'off';
+    }
+    if (help) {
+        help.textContent = transformer === 'deepseek' ? t('modal.thinkingHelpDeepSeek') : t('modal.thinkingHelp');
+    }
+}
+
+function getThinkingControlValue() {
+    const transformer = document.getElementById('endpointTransformer')?.value || 'claude';
+    const enabled = document.getElementById('endpointThinkingEnabled');
+    if (!enabled || !enabled.checked) {
+        return 'off';
+    }
+    return normalizeThinkingForTransformer(transformer, document.getElementById('endpointThinking')?.value ?? '');
+}
+
+export function handleThinkingControlChange() {
+    const transformer = document.getElementById('endpointTransformer')?.value || 'claude';
+    const enabled = document.getElementById('endpointThinkingEnabled');
+    const select = document.getElementById('endpointThinking');
+    if (!enabled || !select) {
+        return;
+    }
+    renderThinkingOptions(transformer, enabled.checked ? select.value : 'off');
+    select.disabled = !enabled.checked;
+}
+
 // Show error toast
 function showError(message) {
     const toast = document.getElementById('errorToast');
@@ -191,12 +282,12 @@ export function showAddEndpointModal() {
     document.getElementById('endpointAuthMode').value = 'api_key';
     document.getElementById('endpointTransformer').value = 'claude';
     document.getElementById('endpointModel').value = '';
-    document.getElementById('endpointThinking').value = 'off';
     document.getElementById('endpointForceStream').checked = false;
     document.getElementById('endpointRemark').value = '';
     handleAuthModeChange();
     updateManageTokenPoolButton();
     handleTransformerChange();
+    setThinkingControlValue('');
     document.getElementById('endpointModal').classList.add('active');
 }
 
@@ -212,12 +303,12 @@ export function showAddEndpointModalWithPreset(presetData) {
 	document.getElementById('endpointAuthMode').value = presetData.authMode || 'api_key';
 	document.getElementById('endpointTransformer').value = presetData.transformer || 'claude';
 	document.getElementById('endpointModel').value = presetData.model || '';
-	document.getElementById('endpointThinking').value = presetData.thinking || 'off';
 	document.getElementById('endpointForceStream').checked = !!presetData.forceStream;
 	document.getElementById('endpointRemark').value = presetData.remark || '';
 	handleAuthModeChange();
 	updateManageTokenPoolButton();
 	handleTransformerChange();
+	setThinkingControlValue(presetData.thinking ?? '');
 	document.getElementById('endpointModal').classList.add('active');
 }
 
@@ -236,13 +327,13 @@ export async function editEndpoint(index) {
     document.getElementById('endpointAuthMode').value = ep.authMode || 'api_key';
     document.getElementById('endpointTransformer').value = ep.transformer || 'claude';
     document.getElementById('endpointModel').value = ep.model || '';
-    document.getElementById('endpointThinking').value = ep.thinking || 'off';
     document.getElementById('endpointForceStream').checked = !!ep.forceStream;
     document.getElementById('endpointRemark').value = ep.remark || '';
 
     handleAuthModeChange();
     updateManageTokenPoolButton();
     handleTransformerChange();
+    setThinkingControlValue(ep.thinking ?? '');
     document.getElementById('endpointModal').classList.add('active');
 }
 
@@ -266,7 +357,7 @@ export async function saveEndpoint() {
 	const authMode = getEndpointAuthMode();
 	let transformer = document.getElementById('endpointTransformer').value;
     const model = document.getElementById('endpointModel').value.trim();
-    const thinking = document.getElementById('endpointThinking').value || 'off';
+    const thinking = getThinkingControlValue();
     const forceStream = document.getElementById('endpointForceStream').checked;
     const remark = document.getElementById('endpointRemark').value.trim();
     const isCodexTokenPool = isCodexTokenPoolMode(authMode);
@@ -366,6 +457,9 @@ export function handleTransformerChange() {
         modelInput.placeholder = 'e.g., kimi-k2.6';
         modelHelpText.textContent = t('modal.modelHelpKimi');
     }
+
+    const currentThinking = getThinkingControlValue();
+    setThinkingControlValue(transformer === 'deepseek' && currentThinking === 'off' ? '' : currentThinking);
 }
 
 // Store fetched models for filtering

@@ -25,10 +25,11 @@ type OpenAITool struct {
 
 // OpenAIMessage represents a message in OpenAI format
 type OpenAIMessage struct {
-	Role       string           `json:"role"`
-	Content    interface{}      `json:"content,omitempty"` // Can be string or array of content parts
-	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          interface{}      `json:"content,omitempty"` // Can be string or array of content parts
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
 }
 
 // OpenAIRequest represents an OpenAI API request
@@ -177,26 +178,29 @@ type ClaudeStreamEvent struct {
 // StreamContext holds the state for a single streaming response
 // This allows multiple concurrent streams to be processed independently
 type StreamContext struct {
-	MessageStartSent     bool
-	ContentBlockStarted  bool
-	ThinkingBlockStarted bool // Track if thinking block has been started
-	ToolBlockStarted     bool // Track if tool_use block has been started
-	ToolBlockPending     bool // Track if tool_use block is pending (waiting for first arguments)
-	MessageID            string
-	ModelName            string
-	InputTokens          int
-	OutputTokens         int
-	ContentIndex         int
-	ThinkingIndex        int // Index for thinking content block
-	ToolIndex            int // Current tool_use content block index (from OpenAI)
-	LastToolIndex        int // Last assigned Anthropic tool block index (incremental counter)
-	FinishReasonSent     bool
-	EnableThinking       bool              // Whether thinking is enabled for this request
-	CurrentToolCall      *OpenAIToolCall   // Current tool call being processed
-	ToolCallBuffer       string            // Buffer for accumulating tool call arguments
-	State                interface{}       // V3 architecture state (openai.StreamState)
-	ToolCallIDMap        map[string]string // tool_use_id -> function_name mapping for Gemini
-	ToolCallCounter      int               // Counter for generating unique tool IDs
+	MessageStartSent       bool
+	ContentBlockStarted    bool
+	ThinkingBlockStarted   bool // Track if thinking block has been started
+	ReasoningOutputStarted bool
+	ReasoningOutputDone    bool
+	ToolBlockStarted       bool // Track if tool_use block has been started
+	ToolBlockPending       bool // Track if tool_use block is pending (waiting for first arguments)
+	MessageID              string
+	ModelName              string
+	InputTokens            int
+	OutputTokens           int
+	ContentIndex           int
+	ThinkingIndex          int // Index for thinking content block
+	ReasoningOutputIndex   int
+	ToolIndex              int // Current tool_use content block index (from OpenAI)
+	LastToolIndex          int // Last assigned Anthropic tool block index (incremental counter)
+	FinishReasonSent       bool
+	EnableThinking         bool              // Whether thinking is enabled for this request
+	CurrentToolCall        *OpenAIToolCall   // Current tool call being processed
+	ToolCallBuffer         string            // Buffer for accumulating tool call arguments
+	State                  interface{}       // V3 architecture state (openai.StreamState)
+	ToolCallIDMap          map[string]string // tool_use_id -> function_name mapping for Gemini
+	ToolCallCounter        int               // Counter for generating unique tool IDs
 	// Codex transformer fields
 	CurrentToolID   string // Current tool call ID being processed
 	CurrentToolName string // Current tool call name being processed
@@ -205,33 +209,38 @@ type StreamContext struct {
 	InThinkingTag       bool   // Track if we are inside a <think> tag
 	ThinkingBuffer      string // Buffer for trailing partial tag detection
 	PendingThinkingText string // Buffered thinking text until closing tag arrives
+	ReasoningText       string // Accumulated Responses reasoning text
 }
 
 // NewStreamContext creates a new stream context with default values
 func NewStreamContext() *StreamContext {
 	return &StreamContext{
-		MessageStartSent:     false,
-		ContentBlockStarted:  false,
-		ThinkingBlockStarted: false,
-		ToolBlockStarted:     false,
-		ToolBlockPending:     false,
-		MessageID:            "",
-		ModelName:            "",
-		InputTokens:          0,
-		OutputTokens:         0,
-		ContentIndex:         0,
-		ThinkingIndex:        0,
-		ToolIndex:            0,
-		LastToolIndex:        0,
-		FinishReasonSent:     false,
-		EnableThinking:       false,
-		CurrentToolCall:      nil,
-		ToolCallBuffer:       "",
-		ToolCallIDMap:        make(map[string]string),
-		ToolCallCounter:      0,
-		InThinkingTag:        false,
-		ThinkingBuffer:       "",
-		PendingThinkingText:  "",
+		MessageStartSent:       false,
+		ContentBlockStarted:    false,
+		ThinkingBlockStarted:   false,
+		ReasoningOutputStarted: false,
+		ReasoningOutputDone:    false,
+		ToolBlockStarted:       false,
+		ToolBlockPending:       false,
+		MessageID:              "",
+		ModelName:              "",
+		InputTokens:            0,
+		OutputTokens:           0,
+		ContentIndex:           0,
+		ThinkingIndex:          0,
+		ReasoningOutputIndex:   0,
+		ToolIndex:              0,
+		LastToolIndex:          0,
+		FinishReasonSent:       false,
+		EnableThinking:         false,
+		CurrentToolCall:        nil,
+		ToolCallBuffer:         "",
+		ToolCallIDMap:          make(map[string]string),
+		ToolCallCounter:        0,
+		InThinkingTag:          false,
+		ThinkingBuffer:         "",
+		PendingThinkingText:    "",
+		ReasoningText:          "",
 	}
 }
 
@@ -374,6 +383,7 @@ type OpenAI2OutputItem struct {
 	ID      string               `json:"id,omitempty"`
 	Role    string               `json:"role,omitempty"`
 	Content []OpenAI2ContentPart `json:"content,omitempty"`
+	Summary []OpenAI2ContentPart `json:"summary,omitempty"`
 	// Function call fields
 	Name      string `json:"name,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
@@ -402,4 +412,5 @@ type OpenAI2StreamEvent struct {
 	Item         *OpenAI2OutputItem  `json:"item,omitempty"`
 	Part         *OpenAI2ContentPart `json:"part,omitempty"`
 	Delta        string              `json:"delta,omitempty"` // Direct string for text delta
+	Text         string              `json:"text,omitempty"`
 }

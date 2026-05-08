@@ -45,6 +45,10 @@ func IsTokenPoolAuthMode(mode string) bool {
 
 func NormalizeThinkingEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "", "default", "auto", "inherit":
+		return ""
+	case ThinkingOff:
+		return ThinkingOff
 	case ThinkingLow:
 		return ThinkingLow
 	case ThinkingMedium:

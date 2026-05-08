@@ -27,6 +27,7 @@ import {
     closeModal,
     handleAuthModeChange,
     handleTransformerChange,
+    handleThinkingControlChange,
     fetchModels,
     initModelInputEvents,
     toggleModelDropdown,
@@ -232,6 +233,7 @@ window.deleteEndpoint = deleteEndpoint;
 window.closeModal = closeModal;
 window.handleAuthModeChange = handleAuthModeChange;
 window.handleTransformerChange = handleTransformerChange;
+window.handleThinkingControlChange = handleThinkingControlChange;
 window.fetchModels = fetchModels;
 window.toggleModelDropdown = toggleModelDropdown;
 window.showEditPortModal = showEditPortModal;

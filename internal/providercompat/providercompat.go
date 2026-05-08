@@ -286,14 +286,32 @@ func AdaptOpenAIChatPayload(payload []byte, transformer, baseURL, thinking strin
 		delete(body, "max_completion_tokens")
 	}
 
-	effort := normalizeThinking(thinking)
+	endpointThinking := normalizeThinking(thinking)
+	requestEffort := ""
 	if reasoning, ok := body["reasoning"].(map[string]interface{}); ok {
 		if value := stringFromMap(reasoning, "effort"); value != "" {
-			effort = value
+			requestEffort = value
 		}
 		delete(body, "reasoning")
 	}
-	if effort != "" {
+	if value := stringFromMap(body, "reasoning_effort"); value != "" {
+		requestEffort = value
+	}
+
+	if provider == ProviderDeepSeek {
+		applyDeepSeekThinking(body, endpointThinking, requestEffort)
+	} else {
+		effort := requestEffort
+		if effort == "" && endpointThinking != "off" {
+			effort = endpointThinking
+		}
+		if effort == "" {
+			updated, err := json.Marshal(body)
+			if err != nil {
+				return payload
+			}
+			return updated
+		}
 		body["reasoning_effort"] = effort
 		if _, exists := body["thinking"]; !exists {
 			body["thinking"] = map[string]interface{}{"type": "enabled"}
@@ -305,6 +323,26 @@ func AdaptOpenAIChatPayload(payload []byte, transformer, baseURL, thinking strin
 		return payload
 	}
 	return updated
+}
+
+func applyDeepSeekThinking(body map[string]interface{}, endpointThinking, requestEffort string) {
+	if endpointThinking == "off" {
+		delete(body, "reasoning_effort")
+		body["thinking"] = map[string]interface{}{"type": "disabled"}
+		return
+	}
+
+	effort := requestEffort
+	if endpointThinking != "" {
+		effort = endpointThinking
+	}
+
+	effort = normalizeDeepSeekThinkingEffort(effort)
+	if effort != "" {
+		body["reasoning_effort"] = effort
+		body["thinking"] = map[string]interface{}{"type": "enabled"}
+		return
+	}
 }
 
 func cleanAPIPath(raw string) string {
@@ -335,10 +373,25 @@ func originURL(raw string) string {
 
 func normalizeThinking(thinking string) string {
 	effort := strings.ToLower(strings.TrimSpace(thinking))
-	if effort == "" || effort == "off" {
+	switch effort {
+	case "", "default", "auto", "inherit":
+		return ""
+	case "off":
+		return "off"
+	default:
+		return effort
+	}
+}
+
+func normalizeDeepSeekThinkingEffort(thinking string) string {
+	switch strings.ToLower(strings.TrimSpace(thinking)) {
+	case "low", "medium", "high":
+		return "high"
+	case "xhigh", "max":
+		return "max"
+	default:
 		return ""
 	}
-	return effort
 }
 
 func stringFromMap(values map[string]interface{}, key string) string {

@@ -39,6 +39,8 @@ var safeConfigKeys = []string{
 	"update_autoCheck", "update_checkInterval",
 }
 
+const deepSeekThinkingDefaultMigrationKey = "migration_deepseek_thinking_default_v1"
+
 type SQLiteStorage struct {
 	db     *sql.DB
 	dbPath string
@@ -93,7 +95,7 @@ func (s *SQLiteStorage) initSchema() error {
 		enabled BOOLEAN DEFAULT TRUE,
 		transformer TEXT DEFAULT 'claude',
 		model TEXT,
-		thinking TEXT DEFAULT 'off',
+			thinking TEXT DEFAULT '',
 		force_stream BOOLEAN DEFAULT FALSE,
 		remark TEXT,
 		sort_order INTEGER DEFAULT 0,
@@ -185,6 +187,9 @@ func (s *SQLiteStorage) initSchema() error {
 	if err := s.migrateThinking(); err != nil {
 		return err
 	}
+	if err := s.migrateDeepSeekThinkingDefault(); err != nil {
+		return err
+	}
 	if err := s.migrateForceStream(); err != nil {
 		return err
 	}
@@ -242,12 +247,39 @@ func (s *SQLiteStorage) migrateThinking() error {
 	}
 
 	if count == 0 {
-		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN thinking TEXT DEFAULT 'off'`); err != nil {
+		if _, err := s.db.Exec(`ALTER TABLE endpoints ADD COLUMN thinking TEXT DEFAULT ''`); err != nil {
 			return err
 		}
 	}
 
-	_, err = s.db.Exec(`UPDATE endpoints SET thinking='off' WHERE thinking IS NULL OR thinking=''`)
+	_, err = s.db.Exec(`UPDATE endpoints SET thinking='' WHERE thinking IS NULL`)
+	return err
+}
+
+func (s *SQLiteStorage) migrateDeepSeekThinkingDefault() error {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM app_config WHERE key=?`, deepSeekThinkingDefaultMigrationKey).Scan(&value)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if value == "done" {
+		return nil
+	}
+
+	if _, err := s.db.Exec(`
+		UPDATE endpoints
+		SET thinking=''
+		WHERE LOWER(TRIM(COALESCE(transformer, ''))) IN ('deepseek', 'deepseek_chat')
+			AND LOWER(TRIM(COALESCE(thinking, ''))) = 'off'
+	`); err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`
+		INSERT INTO app_config (key, value)
+		VALUES (?, 'done')
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+	`, deepSeekThinkingDefaultMigrationKey)
 	return err
 }
 
@@ -272,7 +304,7 @@ func (s *SQLiteStorage) GetEndpoints() ([]Endpoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, auth_mode, enabled, transformer, model, thinking, force_stream, remark, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
+	rows, err := s.db.Query(`SELECT id, name, api_url, api_key, auth_mode, enabled, transformer, model, COALESCE(thinking, ''), force_stream, remark, sort_order, created_at, updated_at FROM endpoints ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -767,9 +799,9 @@ func (s *SQLiteStorage) getEndpointsFromDB(db *sql.DB, dbName string) ([]Endpoin
 		selectAuthMode = "COALESCE(auth_mode, 'api_key')"
 	}
 
-	selectThinking := "'off'"
+	selectThinking := "''"
 	if thinkingColumnCount > 0 {
-		selectThinking = "COALESCE(thinking, 'off')"
+		selectThinking = "COALESCE(thinking, '')"
 	}
 
 	selectForceStream := "FALSE"
@@ -932,9 +964,9 @@ func (s *SQLiteStorage) mergeEndpoints(tx *sql.Tx, strategy MergeStrategy) error
 	if backupHasAuthMode > 0 {
 		selectAuthMode = "COALESCE(auth_mode, 'api_key')"
 	}
-	selectThinking := "'off'"
+	selectThinking := "''"
 	if backupHasThinking > 0 {
-		selectThinking = "COALESCE(thinking, 'off')"
+		selectThinking = "COALESCE(thinking, '')"
 	}
 	selectForceStream := "FALSE"
 	if backupHasForceStream > 0 {

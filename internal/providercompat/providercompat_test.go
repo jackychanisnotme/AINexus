@@ -75,7 +75,7 @@ func TestOpenAIChatTargetPathDeepSeekOfficial(t *testing.T) {
 }
 
 func TestAdaptOpenAIChatPayloadForDeepSeek(t *testing.T) {
-	raw := []byte(`{"model":"deepseek-chat","max_completion_tokens":8,"reasoning":{"effort":"high"}}`)
+	raw := []byte(`{"model":"deepseek-chat","max_completion_tokens":8,"reasoning":{"effort":"medium"}}`)
 	out := AdaptOpenAIChatPayload(raw, "deepseek", "https://api.deepseek.com", "")
 
 	var payload map[string]interface{}
@@ -97,6 +97,56 @@ func TestAdaptOpenAIChatPayloadForDeepSeek(t *testing.T) {
 	}
 	if _, ok := payload["reasoning"]; ok {
 		t.Fatalf("did not expect reasoning object, got %#v", payload["reasoning"])
+	}
+}
+
+func TestAdaptOpenAIChatPayloadForDeepSeekDefaultLeavesThinkingUnset(t *testing.T) {
+	raw := []byte(`{"model":"deepseek-chat","messages":[]}`)
+	out := AdaptOpenAIChatPayload(raw, "deepseek", "https://api.deepseek.com", "")
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if _, ok := payload["reasoning_effort"]; ok {
+		t.Fatalf("did not expect reasoning_effort for provider default, got %#v", payload["reasoning_effort"])
+	}
+	if _, ok := payload["thinking"]; ok {
+		t.Fatalf("did not expect thinking for provider default, got %#v", payload["thinking"])
+	}
+}
+
+func TestAdaptOpenAIChatPayloadForDeepSeekThinkingOff(t *testing.T) {
+	raw := []byte(`{"model":"deepseek-chat","messages":[],"reasoning_effort":"max"}`)
+	out := AdaptOpenAIChatPayload(raw, "deepseek", "https://api.deepseek.com", "off")
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if _, ok := payload["reasoning_effort"]; ok {
+		t.Fatalf("did not expect reasoning_effort when thinking is off, got %#v", payload["reasoning_effort"])
+	}
+	thinking, ok := payload["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("expected thinking.type=disabled, got %#v", payload["thinking"])
+	}
+}
+
+func TestAdaptOpenAIChatPayloadForDeepSeekXHighMapsToMax(t *testing.T) {
+	raw := []byte(`{"model":"deepseek-chat","messages":[]}`)
+	out := AdaptOpenAIChatPayload(raw, "deepseek", "https://api.deepseek.com", "xhigh")
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if payload["reasoning_effort"] != "max" {
+		t.Fatalf("expected reasoning_effort=max, got %#v", payload["reasoning_effort"])
+	}
+	thinking, ok := payload["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("expected thinking.type=enabled, got %#v", payload["thinking"])
 	}
 }
 
