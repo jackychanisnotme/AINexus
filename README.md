@@ -17,9 +17,9 @@
 ccNexus 不只是 Claude Code & Codex CLI 的智能端点轮换代理，也是一套面向 AI 开发工作流的 API 资源管理系统。它把端点、模型、密钥、Codex Token Pool、额度、统计和备份统一管理起来，再对外提供一个稳定的本地 API 入口。
 
 > [!IMPORTANT]
-> 当前仓库维护 native-compatible fallback 版本，重点增强 Codex CLI / OpenAI Responses API / DeepSeek / Kimi 等兼容场景。
+> 当前仓库维护 Optimized 版本，重点增强 Codex CLI / OpenAI Responses API / DeepSeek / Kimi 等兼容场景。
 >
-> 最新发布：[`native-compatible-fallback-20260508-3b7560d`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+> 最新发布：[`ccNexus Optimized 20260508 (7f3d067)`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
 ## 功能特性
 

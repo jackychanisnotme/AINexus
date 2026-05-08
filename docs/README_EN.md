@@ -17,9 +17,9 @@
 ccNexus is more than a smart endpoint rotation proxy for Claude Code and Codex CLI. It is an API resource management system for AI development workflows, bringing endpoints, models, API keys, Codex Token Pools, quota snapshots, usage statistics, and backups into one local control plane.
 
 > [!IMPORTANT]
-> This fork maintains the native-compatible fallback line, with extra compatibility for Codex CLI, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
+> This fork maintains the Optimized line, with extra compatibility for Codex CLI, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
 >
-> Latest release: [`native-compatible-fallback-20260508-3b7560d`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+> Latest release: [`ccNexus Optimized 20260508 (7f3d067)`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
 ## Features
 
