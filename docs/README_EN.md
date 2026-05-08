@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="images/ccNexus.svg" alt="Claude Code & Codex CLI 智能端点轮换代理" width="720" />
+  <img src="images/ccNexus.svg" alt="Claude Code & Codex CLI API Resource Management Hub" width="720" />
 </p>
 
 [![Build Status](https://github.com/jackychanisnotme/ccNexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/ccNexus/actions)
@@ -14,7 +14,7 @@
 
 </div>
 
-ccNexus is a local API hub for Claude Code, Codex CLI, and OpenAI-compatible clients. It exposes one stable local endpoint while handling upstream rotation, request/response conversion, token pools, failover, live statistics, and backup sync.
+ccNexus is more than a smart endpoint rotation proxy for Claude Code and Codex CLI. It is an API resource management system for AI development workflows, bringing endpoints, models, API keys, Codex Token Pools, quota snapshots, usage statistics, and backups into one local control plane.
 
 > [!IMPORTANT]
 > This fork maintains the native-compatible fallback line, with extra compatibility for Codex CLI, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
@@ -24,6 +24,7 @@ ccNexus is a local API hub for Claude Code, Codex CLI, and OpenAI-compatible cli
 ## Features
 
 - **One Local Gateway**: Connect Claude Code, Codex CLI, OpenAI Chat/Responses-compatible clients, and model tools to one local base URL
+- **API Resource Management**: Manage endpoints, models, API keys, Token Pools, quota snapshots, usage statistics, and backup data in one place
 - **Endpoint Rotation and Failover**: Rotate across enabled endpoints and skip failing upstreams automatically
 - **Protocol Conversion**: Convert between Claude, OpenAI Chat, OpenAI Responses, Gemini, DeepSeek, and Kimi/Moonshot formats
 - **Codex Token Pool**: Bulk import `access_token/refresh_token`, rotate credentials, refresh after 401s, isolate invalid tokens, and target the ChatGPT Codex backend automatically
@@ -49,7 +50,8 @@ ccNexus is a local API hub for Claude Code, Codex CLI, and OpenAI-compatible cli
 [Download the latest release from this fork](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
 - **macOS**: Extract the `.zip`, move `ccNexus.app` to Applications, then right-click → Open for the first run
-- **Windows / Linux**: Build from source, or use server mode/Docker
+- **Windows**: Download `windows-amd64.zip`, extract it, then run `ccNexus.exe`
+- **Linux**: Build from source, or use server mode/Docker
 - **Server mode**: `cd cmd/server && go run main.go`
 
 ### 2. Add Endpoints

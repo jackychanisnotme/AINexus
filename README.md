@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="docs/images/ccNexus.svg" alt="Claude Code & Codex CLI 智能端点轮换代理" width="720" />
+  <img src="docs/images/ccNexus.svg" alt="Claude Code & Codex CLI API 资源管理中枢" width="720" />
 </p>
 
 [![构建状态](https://github.com/jackychanisnotme/ccNexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/ccNexus/actions)
@@ -14,7 +14,7 @@
 
 </div>
 
-ccNexus 是一个面向 Claude Code、Codex CLI 和 OpenAI 兼容客户端的本地 API 中枢。它把多个上游模型端点统一成一个稳定入口，负责端点轮换、格式转换、Token Pool、故障转移、统计监控和备份同步。
+ccNexus 不只是 Claude Code & Codex CLI 的智能端点轮换代理，也是一套面向 AI 开发工作流的 API 资源管理系统。它把端点、模型、密钥、Codex Token Pool、额度、统计和备份统一管理起来，再对外提供一个稳定的本地 API 入口。
 
 > [!IMPORTANT]
 > 当前仓库维护 native-compatible fallback 版本，重点增强 Codex CLI / OpenAI Responses API / DeepSeek / Kimi 等兼容场景。
@@ -24,6 +24,7 @@ ccNexus 是一个面向 Claude Code、Codex CLI 和 OpenAI 兼容客户端的本
 ## 功能特性
 
 - **统一代理入口**：Claude Code、Codex CLI、OpenAI Chat/Responses 兼容客户端都可以接入同一个本地地址
+- **API 资源管理**：集中管理端点、模型、API Key、Token Pool、额度快照、用量统计和备份数据
 - **多端点轮换与故障转移**：按顺序轮换可用端点，失败自动跳过并切换，降低单个上游异常对工作流的影响
 - **多协议格式转换**：支持 Claude、OpenAI Chat、OpenAI Responses、Gemini、DeepSeek、Kimi/Moonshot 等格式互转
 - **Codex Token Pool**：批量导入 `access_token/refresh_token`，自动轮换、401 后刷新、失效隔离，并固定适配 ChatGPT Codex 后端
@@ -49,7 +50,8 @@ ccNexus 是一个面向 Claude Code、Codex CLI 和 OpenAI 兼容客户端的本
 [下载当前 fork 最新版本](https://github.com/jackychanisnotme/ccNexus/releases/latest)
 
 - **macOS**：下载 `.zip` 后解压，将 `ccNexus.app` 移动到「应用程序」，首次运行右键点击 → 打开
-- **Windows / Linux**：可从源码构建，或使用服务器模式/Docker 部署
+- **Windows**：下载 `windows-amd64.zip` 后解压，运行 `ccNexus.exe`
+- **Linux**：可从源码构建，或使用服务器模式/Docker 部署
 - **服务器模式**：`cd cmd/server && go run main.go`
 
 ### 2. 添加端点
