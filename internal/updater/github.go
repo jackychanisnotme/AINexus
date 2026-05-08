@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	githubAPIURL = "https://api.github.com/repos/lich0821/ccNexus/releases/latest"
+	githubAPIURL = "https://api.github.com/repos/jackychanisnotme/ccNexus/releases/latest"
 	httpTimeout  = 30 * time.Second
 )
 
