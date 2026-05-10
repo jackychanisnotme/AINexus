@@ -40,7 +40,6 @@ import {
     showChangelogIfNewVersion,
     testEndpointHandler,
     closeTestResultModal,
-    openGitHub,
     openArticle,
     togglePasswordVisibility,
     acceptConfirm,
@@ -239,7 +238,6 @@ window.showChangelogModal = showChangelogModal;
 window.closeChangelogModal = closeChangelogModal;
 window.testEndpoint = testEndpointHandler;
 window.closeTestResultModal = closeTestResultModal;
-window.openGitHub = openGitHub;
 window.openArticle = openArticle;
 window.toggleLogPanel = toggleLogPanel;
 window.changeLogLevel = changeLogLevel;

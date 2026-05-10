@@ -832,13 +832,6 @@ export function closeTestResultModal() {
     clearTestState();
 }
 
-// External URLs
-export function openGitHub() {
-    if (window.go?.main?.App) {
-        window.go.main.App.OpenURL('https://github.com/lich0821/ccNexus');
-    }
-}
-
 export function openArticle() {
     if (window.go?.main?.App) {
         window.go.main.App.OpenURL('https://mp.weixin.qq.com/s/ohtkyIMd5YC7So1q-gE0og');
