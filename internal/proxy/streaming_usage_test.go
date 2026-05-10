@@ -71,10 +71,10 @@ func TestHandleStreamingResponseExtractsUsageFromOriginalEvent(t *testing.T) {
 		endpoint,
 		&noUsageStreamTransformer{},
 		"cc_openai2",
-		false,
 		"gpt-4.1",
 		[]byte(`{}`),
 		0,
+		false,
 	)
 	in, out := result.InputTokens, result.OutputTokens
 

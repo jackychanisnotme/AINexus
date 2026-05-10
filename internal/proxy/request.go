@@ -523,6 +523,10 @@ func extractModelFromPayload(payload []byte) string {
 
 // sendRequest sends the HTTP request and returns the response
 func sendRequest(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config) (*http.Response, error) {
+	return sendRequestWithResponseHeaderTimeout(ctx, proxyReq, httpClient, cfg, 0)
+}
+
+func sendRequestWithResponseHeaderTimeout(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config, responseHeaderTimeout time.Duration) (*http.Response, error) {
 	proxyReq = proxyReq.WithContext(ctx)
 
 	proxyURL := resolveProxyURLForRequest(cfg, proxyReq.URL)
@@ -533,10 +537,10 @@ func sendRequest(ctx context.Context, proxyReq *http.Request, httpClient *http.C
 			Timeout: httpClient.Timeout,
 		}
 
-		transport, err := CreateProxyTransport(proxyURL)
+		transport, err := createProxyTransportWithResponseHeaderTimeout(proxyURL, responseHeaderTimeout)
 		if err != nil {
 			logger.Warn("Failed to create proxy transport: %v, using direct connection", err)
-			clientWithProxy.Transport = httpClient.Transport
+			clientWithProxy.Transport = transportWithResponseHeaderTimeout(httpClient.Transport, responseHeaderTimeout)
 		} else {
 			clientWithProxy.Transport = transport
 		}
@@ -544,7 +548,26 @@ func sendRequest(ctx context.Context, proxyReq *http.Request, httpClient *http.C
 		return clientWithProxy.Do(proxyReq)
 	}
 
-	return httpClient.Do(proxyReq)
+	if responseHeaderTimeout <= 0 {
+		return httpClient.Do(proxyReq)
+	}
+	clientWithHeaderTimeout := &http.Client{
+		Timeout:   httpClient.Timeout,
+		Transport: transportWithResponseHeaderTimeout(httpClient.Transport, responseHeaderTimeout),
+	}
+	return clientWithHeaderTimeout.Do(proxyReq)
+}
+
+func transportWithResponseHeaderTimeout(base http.RoundTripper, responseHeaderTimeout time.Duration) http.RoundTripper {
+	if responseHeaderTimeout <= 0 || base == nil {
+		return base
+	}
+	if transport, ok := base.(*http.Transport); ok {
+		cloned := transport.Clone()
+		cloned.ResponseHeaderTimeout = responseHeaderTimeout
+		return cloned
+	}
+	return base
 }
 
 func resolveProxyURLForRequest(cfg *config.Config, targetURL *url.URL) string {
@@ -576,9 +599,16 @@ func isCodexRequestURL(targetURL *url.URL) bool {
 
 // CreateProxyTransport creates an http.Transport with proxy support
 func CreateProxyTransport(proxyURL string) (*http.Transport, error) {
+	return createProxyTransportWithResponseHeaderTimeout(proxyURL, 0)
+}
+
+func createProxyTransportWithResponseHeaderTimeout(proxyURL string, responseHeaderTimeout time.Duration) (*http.Transport, error) {
 	parsed, err := url.Parse(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	if responseHeaderTimeout <= 0 {
+		responseHeaderTimeout = 90 * time.Second
 	}
 
 	transport := &http.Transport{
@@ -587,7 +617,7 @@ func CreateProxyTransport(proxyURL string) (*http.Transport, error) {
 		IdleConnTimeout:        90 * time.Second,
 		TLSHandshakeTimeout:    10 * time.Second,
 		ExpectContinueTimeout:  1 * time.Second,
-		ResponseHeaderTimeout:  90 * time.Second,
+		ResponseHeaderTimeout:  responseHeaderTimeout,
 		WriteBufferSize:        128 * 1024, // 128KB write buffer for large SSE streams
 		ReadBufferSize:         128 * 1024, // 128KB read buffer for large SSE streams
 		MaxResponseHeaderBytes: 64 * 1024,  // 64KB max response headers

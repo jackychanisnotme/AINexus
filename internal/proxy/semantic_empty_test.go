@@ -198,6 +198,56 @@ func TestForceStreamAggregationSemanticEmptyRetriesBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestStreamingSemanticEmptyRetriesAfterKeepalive(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if hits == 1 {
+			_, _ = w.Write([]byte(strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp-empty","object":"response","status":"in_progress"}}`,
+				"",
+				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[]}}`,
+				"",
+				"data: [DONE]",
+				"",
+			}, "\n")))
+			return
+		}
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"ok"}`,
+			"",
+			`data: {"type":"response.completed","response":{"id":"resp-ok","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected streaming retry to keep response open and succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 2 {
+		t.Fatalf("expected streaming empty response to be retried once, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), ": ccnexus stream open") || !strings.Contains(rec.Body.String(), "response.output_text.delta") {
+		t.Fatalf("expected keepalive and final semantic event, got %q", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "resp-empty") {
+		t.Fatalf("did not expect empty completed event to be forwarded, got %q", rec.Body.String())
+	}
+}
+
 func TestTokenPoolSemanticEmptySoftCoolsCredentialAndRetriesNextToken(t *testing.T) {
 	var tokens []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

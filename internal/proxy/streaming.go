@@ -38,7 +38,7 @@ type streamResponseResult struct {
 }
 
 // handleStreamingResponse processes streaming SSE responses
-func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, endpoint config.Endpoint, trans transformer.Transformer, transformerName string, thinkingEnabled bool, modelName string, bodyBytes []byte, credentialID int64) streamResponseResult {
+func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, endpoint config.Endpoint, trans transformer.Transformer, transformerName string, modelName string, bodyBytes []byte, credentialID int64, downstreamStarted bool) streamResponseResult {
 	result := streamResponseResult{}
 
 	flusher, ok := w.(http.Flusher)
@@ -50,7 +50,7 @@ func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWrit
 		return result
 	}
 
-	headersCommitted := false
+	headersCommitted := downstreamStarted
 	commitHeaders := func() {
 		if headersCommitted {
 			return
@@ -69,6 +69,15 @@ func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWrit
 		w.WriteHeader(resp.StatusCode)
 		headersCommitted = true
 	}
+	writeKeepalive := func() error {
+		commitHeaders()
+		if _, err := w.Write([]byte(": ccnexus stream open\n\n")); err != nil {
+			return err
+		}
+		result.WroteData = true
+		flusher.Flush()
+		return nil
+	}
 
 	// Handle gzip-encoded response body
 	var reader io.Reader = resp.Body
@@ -83,6 +92,13 @@ func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWrit
 		}
 		defer gzipReader.Close()
 		reader = gzipReader
+	}
+
+	if err := writeKeepalive(); err != nil {
+		resp.Body.Close()
+		result.Reason = streamFinishDownstreamWriteFailed
+		result.Err = err
+		return result
 	}
 
 	// Create stream context for all transformers except pure passthrough

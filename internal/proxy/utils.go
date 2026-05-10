@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
@@ -32,6 +33,7 @@ func cloneEndpoints(endpoints []config.Endpoint) []config.Endpoint {
 const (
 	endpointFastFailoverAttempts = 2
 	endpointSlowFailoverAttempts = 3
+	streamResponseHeaderTimeout  = 25 * time.Second
 )
 
 // shouldRetry determines if a response should trigger a retry
