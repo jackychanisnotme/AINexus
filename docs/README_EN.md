@@ -36,6 +36,20 @@ ccNexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI,
 - **Desktop and Server Modes**: Use the Wails desktop app locally, or run `cmd/server` headlessly on a server, NAS, or Docker host
 - **Backup and Sync**: Support WebDAV, local backups, and S3-compatible storage
 
+## Design Trade-Offs vs. the Original Project
+
+The Optimized line keeps the original [lich0821/ccNexus](https://github.com/lich0821/ccNexus) idea of one local proxy gateway, while shifting the focus from simple rotation to long-running, multi-endpoint, concurrent AI workflows. The original design is smaller and easier to reason about; the Optimized line puts more weight on resilience, observability, and Codex/Responses compatibility.
+
+| Area | Original Strength | Optimized Improvement |
+|------|-------------------|-----------------------|
+| Failover model | Global endpoint rotation after failures, direct and easy to inspect | Request-local fallback that avoids changing the global default endpoint for unrelated requests |
+| Error handling | Simple policy with low maintenance overhead | Classifies quota exhaustion, rate limits, upstream 5xx, network errors, API key failures, and wrapped invalid requests |
+| Endpoint recovery | Minimal hidden state, highly predictable behavior | Configurable cooldowns with auto-return or deprioritization for recovered endpoints |
+| Streaming reliability | Compact traditional proxy behavior | SSE heartbeat, forced upstream streaming, streaming error classification, and semantic empty-output detection |
+| Operations visibility | Basic logs and stats | Request IDs, attempt headers, retry reasons, endpoint runtime state, and per-credential usage/quota snapshots |
+
+For a lightweight local rotation proxy, the original version remains refreshingly simple. For running Claude Code, Codex CLI, Hermes Agent, Token Pools, and multiple third-party upstreams together for long sessions, the Optimized line provides stronger isolation, recovery, and visibility.
+
 ## Client Compatibility
 
 | Client | Recommended Entry | Status |
