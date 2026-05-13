@@ -574,7 +574,7 @@ func TestClientCanceledRequestDoesNotPersistFailureStatus(t *testing.T) {
 	_ = primaryHits
 }
 
-func TestStreamingUpstreamErrorCoolsEndpointForNextRequest(t *testing.T) {
+func TestStreamingUpstreamErrorRetriesBeforeRequestLocalFallback(t *testing.T) {
 	logger.GetLogger().Clear()
 	logger.GetLogger().SetMinLevel(logger.DEBUG)
 
@@ -596,9 +596,16 @@ func TestStreamingUpstreamErrorCoolsEndpointForNextRequest(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Status:     "200 OK",
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"id":"resp-fallback","usage":{"input_tokens":1,"output_tokens":2},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`)),
-				Request:    req,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					`data: {"type":"response.output_text.delta","delta":"ok"}`,
+					"",
+					`data: {"type":"response.completed","response":{"id":"resp-fallback","object":"response","status":"completed","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+					"",
+					"data: [DONE]",
+					"",
+				}, "\n"))),
+				Request: req,
 			}, nil
 		default:
 			t.Fatalf("unexpected upstream host %q", req.URL.Host)
@@ -621,11 +628,14 @@ func TestStreamingUpstreamErrorCoolsEndpointForNextRequest(t *testing.T) {
 	streamRec := httptest.NewRecorder()
 	p.handleProxy(streamRec, streamReq)
 
-	if primaryHits != 1 {
-		t.Fatalf("expected first streaming request to hit Primary once, got %d", primaryHits)
+	if streamRec.Code != http.StatusOK {
+		t.Fatalf("expected stream fallback to succeed, got status=%d body=%q", streamRec.Code, streamRec.Body.String())
 	}
-	if fallbackHits != 0 {
-		t.Fatalf("expected in-flight streaming error not to replay on fallback, got fallback hits=%d", fallbackHits)
+	if primaryHits != endpointFastFailoverAttempts {
+		t.Fatalf("expected streaming request to retry Primary %d times before fallback, got %d", endpointFastFailoverAttempts, primaryHits)
+	}
+	if fallbackHits != 1 {
+		t.Fatalf("expected request-local fallback to be used once, got %d", fallbackHits)
 	}
 	p.cooldownMu.RLock()
 	cooldown, cooled := p.endpointCooldowns["Primary"]
@@ -633,44 +643,30 @@ func TestStreamingUpstreamErrorCoolsEndpointForNextRequest(t *testing.T) {
 	if !cooled || cooldown.Reason != "upstream_stream_error" {
 		t.Fatalf("expected Primary cooldown for upstream_stream_error, got cooled=%v cooldown=%#v", cooled, cooldown)
 	}
-	if got := p.GetCurrentEndpointName(); got != "Fallback" {
-		t.Fatalf("expected global current endpoint to auto-switch to Fallback after stream error, got %q", got)
+	if got := p.GetCurrentEndpointName(); got != "Primary" {
+		t.Fatalf("expected global current endpoint to remain Primary, got %q", got)
 	}
-	if len(currentEvents) != 1 {
-		t.Fatalf("expected one current endpoint event, got %#v", currentEvents)
+	if len(currentEvents) != 0 {
+		t.Fatalf("expected no current endpoint events, got %#v", currentEvents)
 	}
-	if event := currentEvents[0]; event.PreviousName != "Primary" || event.Name != "Fallback" || event.Reason != "failure" {
-		t.Fatalf("expected failure current endpoint event Primary -> Fallback, got %#v", event)
+	body := streamRec.Body.String()
+	if !strings.Contains(body, "response.output_text.delta") || strings.Contains(body, "event: error") {
+		t.Fatalf("expected fallback stream output without final SSE error, got %q", body)
 	}
 
 	logs := joinedProxyLogs()
 	for _, want := range []string{
-		"[AUTO SWITCH] Primary",
-		"Fallback",
-		"switch_reason=upstream_stream_error",
+		"Streaming response failed before semantic output",
+		"retry_reason=upstream_stream_error",
+		"[FAILOVER] Primary",
+		"failover_reason=upstream_stream_error",
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("expected logs to contain %q, got logs:\n%s", want, logs)
 		}
 	}
-
-	nextReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":[]}`))
-	nextReq.Header.Set("Content-Type", "application/json")
-	nextReq.Header.Set(headerCCNexusRequestID, "req-after-stream-error")
-	nextRec := httptest.NewRecorder()
-	p.handleProxy(nextRec, nextReq)
-
-	if nextRec.Code != http.StatusOK {
-		t.Fatalf("expected next request to succeed on fallback, got status=%d body=%q", nextRec.Code, nextRec.Body.String())
-	}
-	if primaryHits != 1 {
-		t.Fatalf("expected cooled Primary to be skipped on next request, got primary hits=%d", primaryHits)
-	}
-	if fallbackHits != 1 {
-		t.Fatalf("expected next request to use Fallback once, got %d", fallbackHits)
-	}
-	if got := nextRec.Header().Get(headerCCNexusEndpoint); got != "Fallback" {
-		t.Fatalf("expected next request endpoint Fallback, got %q", got)
+	if strings.Contains(logs, "[AUTO SWITCH]") {
+		t.Fatalf("expected no auto switch log after request-local stream fallback, got logs:\n%s", logs)
 	}
 }
 
@@ -742,26 +738,30 @@ func TestStreamingUpstreamErrorAfterSemanticDataWritesErrorAndSwitches(t *testin
 			t.Fatalf("expected downstream body to contain %q, got %q", want, body)
 		}
 	}
-	if got := p.GetCurrentEndpointName(); got != "Fallback" {
-		t.Fatalf("expected global current endpoint to auto-switch to Fallback after stream error, got %q", got)
+	if got := p.GetCurrentEndpointName(); got != "Primary" {
+		t.Fatalf("expected global current endpoint to remain Primary, got %q", got)
 	}
-	if len(currentEvents) != 1 {
-		t.Fatalf("expected one current endpoint event, got %#v", currentEvents)
+	if len(currentEvents) != 0 {
+		t.Fatalf("expected no current endpoint events, got %#v", currentEvents)
 	}
-	if event := currentEvents[0]; event.PreviousName != "Primary" || event.Name != "Fallback" || event.Reason != "failure" {
-		t.Fatalf("expected failure current endpoint event Primary -> Fallback, got %#v", event)
+	p.cooldownMu.RLock()
+	_, cooled := p.endpointCooldowns["Primary"]
+	p.cooldownMu.RUnlock()
+	if cooled {
+		t.Fatal("expected post-output stream interruption not to cool Primary")
 	}
 
 	logs := joinedProxyLogs()
 	for _, want := range []string{
-		"Streaming response failed",
+		"Streaming response failed after semantic output",
 		"retry_reason=upstream_stream_error",
-		"[AUTO SWITCH] Primary",
-		"switch_reason=upstream_stream_error",
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("expected logs to contain %q, got logs:\n%s", want, logs)
 		}
+	}
+	if strings.Contains(logs, "[AUTO SWITCH]") {
+		t.Fatalf("expected no auto switch log after post-output stream interruption, got logs:\n%s", logs)
 	}
 }
 
@@ -816,8 +816,8 @@ func TestStreamingUpstreamErrorDoesNotSwitchGlobalWhenFailedEndpointIsNotCurrent
 	if primaryHits != 0 {
 		t.Fatalf("expected specified failing request not to hit Primary, got %d", primaryHits)
 	}
-	if fallbackHits != 1 {
-		t.Fatalf("expected specified failing request to hit Fallback once, got %d", fallbackHits)
+	if fallbackHits != endpointFastFailoverAttempts {
+		t.Fatalf("expected specified failing request to retry Fallback %d times, got %d", endpointFastFailoverAttempts, fallbackHits)
 	}
 	if got := p.GetCurrentEndpointName(); got != "Primary" {
 		t.Fatalf("expected global current endpoint to remain Primary, got %q", got)

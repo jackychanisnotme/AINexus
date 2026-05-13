@@ -150,22 +150,15 @@ func GeminiStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 		if jsonData == "[DONE]" {
 			var result strings.Builder
 			writeEvent := func(evt map[string]interface{}) {
-				d, _ := json.Marshal(evt)
-				result.WriteString(fmt.Sprintf("data: %s\n\n", d))
+				writeOpenAI2StreamEvent(ctx, &result, evt)
 			}
 			if ctx.ContentBlockStarted {
-				writeEvent(map[string]interface{}{"type": "response.output_text.done", "output_index": 0, "content_index": 0})
-				writeEvent(map[string]interface{}{"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": map[string]interface{}{"type": "output_text"}})
-				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": map[string]interface{}{"type": "message", "role": "assistant", "status": "completed"}})
+				writeEvent(openAI2TextDoneEvent(ctx, 0))
+				writeEvent(openAI2ContentPartDoneEvent(ctx, 0))
+				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": openAI2MessageItem(ctx, 0, "completed")})
 			}
 			totalTokens := ctx.InputTokens + ctx.OutputTokens
-			writeEvent(map[string]interface{}{
-				"type": "response.completed",
-				"response": map[string]interface{}{
-					"id": ctx.MessageID, "object": "response", "status": "completed",
-					"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens, "total_tokens": totalTokens},
-				},
-			})
+			writeEvent(openAI2CompletedEvent(ctx, totalTokens))
 			result.WriteString("data: [DONE]\n\n")
 			return []byte(result.String()), nil
 		}
@@ -197,18 +190,14 @@ func GeminiStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 
 	var result strings.Builder
 	writeEvent := func(evt map[string]interface{}) {
-		d, _ := json.Marshal(evt)
-		result.WriteString(fmt.Sprintf("data: %s\n\n", d))
+		writeOpenAI2StreamEvent(ctx, &result, evt)
 	}
 
 	// Send response.created on first chunk
 	if !ctx.MessageStartSent {
 		ctx.MessageStartSent = true
 		ctx.MessageID = "gemini-resp"
-		writeEvent(map[string]interface{}{
-			"type": "response.created",
-			"response": map[string]interface{}{"id": ctx.MessageID, "object": "response", "status": "in_progress"},
-		})
+		writeEvent(openAI2CreatedEvent(ctx))
 	}
 
 	candidate := resp.Candidates[0]
@@ -218,27 +207,32 @@ func GeminiStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 				ctx.ContentBlockStarted = true
 				writeEvent(map[string]interface{}{
 					"type": "response.output_item.added", "output_index": 0,
-					"item": map[string]interface{}{"type": "message", "role": "assistant", "status": "in_progress", "content": []interface{}{}},
+					"item": openAI2MessageItem(ctx, 0, "in_progress"),
 				})
-				writeEvent(map[string]interface{}{
-					"type": "response.content_part.added", "output_index": 0, "content_index": 0,
-					"part": map[string]interface{}{"type": "output_text", "text": ""},
-				})
+				writeEvent(openAI2ContentPartAddedEvent(ctx, 0))
 			}
-			writeEvent(map[string]interface{}{"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": part.Text})
+			writeEvent(openAI2TextDeltaEvent(ctx, 0, part.Text))
 		}
 		if part.FunctionCall != nil {
 			args, _ := json.Marshal(part.FunctionCall.Args)
 			callID := fmt.Sprintf("call_%d", ctx.ToolCallCounter)
 			ctx.ToolCallCounter++
+			recordOpenAI2ToolCall(ctx, ctx.ToolCallCounter, callID, part.FunctionCall.Name)
+			recordOpenAI2ToolArguments(ctx, ctx.ToolCallCounter, string(args))
 			writeEvent(map[string]interface{}{
 				"type": "response.output_item.added", "output_index": ctx.ToolCallCounter,
-				"item": map[string]interface{}{"type": "function_call", "call_id": callID, "name": part.FunctionCall.Name, "arguments": "", "status": "in_progress"},
+				"item": openAI2ToolItem(ctx, ctx.ToolCallCounter, "in_progress"),
 			})
-			writeEvent(map[string]interface{}{"type": "response.function_call_arguments.done", "output_index": ctx.ToolCallCounter, "arguments": string(args)})
+			writeEvent(map[string]interface{}{
+				"type":         "response.function_call_arguments.done",
+				"output_index": ctx.ToolCallCounter,
+				"item_id":      openAI2OutputItemID(ctx, ctx.ToolCallCounter),
+				"name":         part.FunctionCall.Name,
+				"arguments":    string(args),
+			})
 			writeEvent(map[string]interface{}{
 				"type": "response.output_item.done", "output_index": ctx.ToolCallCounter,
-				"item": map[string]interface{}{"type": "function_call", "call_id": callID, "name": part.FunctionCall.Name, "arguments": string(args), "status": "completed"},
+				"item": openAI2ToolItem(ctx, ctx.ToolCallCounter, "completed"),
 			})
 		}
 	}
@@ -246,22 +240,16 @@ func GeminiStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 	// Check for finish
 	if candidate.FinishReason != "" {
 		if ctx.ContentBlockStarted {
-			writeEvent(map[string]interface{}{"type": "response.output_text.done", "output_index": 0, "content_index": 0})
-			writeEvent(map[string]interface{}{"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": map[string]interface{}{"type": "output_text"}})
-			writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": map[string]interface{}{"type": "message", "role": "assistant", "status": "completed"}})
+			writeEvent(openAI2TextDoneEvent(ctx, 0))
+			writeEvent(openAI2ContentPartDoneEvent(ctx, 0))
+			writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": openAI2MessageItem(ctx, 0, "completed")})
 			ctx.ContentBlockStarted = false
 		}
 		totalTokens := ctx.InputTokens + ctx.OutputTokens
 		if resp.UsageMetadata != nil && resp.UsageMetadata.TotalTokenCount > 0 {
 			totalTokens = resp.UsageMetadata.TotalTokenCount
 		}
-		writeEvent(map[string]interface{}{
-			"type": "response.completed",
-			"response": map[string]interface{}{
-				"id": ctx.MessageID, "object": "response", "status": "completed",
-				"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens, "total_tokens": totalTokens},
-			},
-		})
+		writeEvent(openAI2CompletedEvent(ctx, totalTokens))
 		result.WriteString("data: [DONE]\n\n")
 	}
 
@@ -437,4 +425,3 @@ func convertOpenAI2ContentToGeminiParts(content interface{}) []map[string]interf
 
 	return parts
 }
-

@@ -3,10 +3,12 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lich0821/ccNexus/internal/config"
 	"github.com/lich0821/ccNexus/internal/logger"
@@ -443,4 +445,101 @@ func TestShouldHandleAsStreamingResponseForCodexWithoutContentType(t *testing.T)
 	if !shouldHandleAsStreamingResponse("text/event-stream", false, endpoint, "cx_chat_openai2") {
 		t.Fatal("expected text/event-stream content-type to be treated as streaming")
 	}
+}
+
+func TestSendRequestDisablesClientTimeoutForStreamingBody(t *testing.T) {
+	client := &http.Client{
+		Timeout: 10 * time.Millisecond,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: &contextAwareDelayedBody{
+					ctx:   req.Context(),
+					delay: 30 * time.Millisecond,
+					data:  []byte("data: ok\n\n"),
+				},
+				Request: req,
+			}, nil
+		}),
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://upstream.example/v1/responses", strings.NewReader(`{"stream":true}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := sendRequestWithResponseHeaderTimeout(context.Background(), req, client, nil, 0, false)
+	if err != nil {
+		t.Fatalf("expected response with streaming client timeout disabled, got error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("expected delayed streaming body to read successfully, got error: %v", err)
+	}
+	if string(body) != "data: ok\n\n" {
+		t.Fatalf("unexpected body %q", body)
+	}
+}
+
+func TestSendRequestKeepsClientTimeoutForNonStreamingBody(t *testing.T) {
+	client := &http.Client{
+		Timeout: 10 * time.Millisecond,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: &contextAwareDelayedBody{
+					ctx:   req.Context(),
+					delay: 30 * time.Millisecond,
+					data:  []byte(`{"ok":true}`),
+				},
+				Request: req,
+			}, nil
+		}),
+	}
+	req, err := http.NewRequest(http.MethodPost, "https://upstream.example/v1/responses", strings.NewReader(`{"stream":false}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resp, err := sendRequestWithResponseHeaderTimeout(context.Background(), req, client, nil, 0, true)
+	if err != nil {
+		t.Fatalf("expected response headers before client timeout, got error: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err == nil {
+		t.Fatal("expected non-streaming body read to respect client timeout")
+	}
+}
+
+type contextAwareDelayedBody struct {
+	ctx    context.Context
+	delay  time.Duration
+	data   []byte
+	offset int
+	waited bool
+}
+
+func (b *contextAwareDelayedBody) Read(p []byte) (int, error) {
+	if b.offset >= len(b.data) {
+		return 0, io.EOF
+	}
+	if !b.waited {
+		b.waited = true
+		select {
+		case <-b.ctx.Done():
+			return 0, b.ctx.Err()
+		case <-time.After(b.delay):
+		}
+	}
+	n := copy(p, b.data[b.offset:])
+	b.offset += n
+	return n, nil
+}
+
+func (b *contextAwareDelayedBody) Close() error {
+	return nil
 }

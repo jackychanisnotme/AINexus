@@ -524,22 +524,32 @@ func extractModelFromPayload(payload []byte) string {
 	return strings.TrimSpace(model)
 }
 
-// sendRequest sends the HTTP request and returns the response
+// sendRequest sends the HTTP request and returns the response.
 func sendRequest(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config) (*http.Response, error) {
+	return sendRequestWithClientTimeout(ctx, proxyReq, httpClient, cfg, true)
+}
+
+func sendRequestWithClientTimeout(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config, useClientTimeout bool) (*http.Response, error) {
 	proxyReq = proxyReq.WithContext(ctx)
+	client := httpClient
+	if !useClientTimeout {
+		clientWithoutTimeout := *httpClient
+		clientWithoutTimeout.Timeout = 0
+		client = &clientWithoutTimeout
+	}
 
 	proxyURL := resolveProxyURLForRequest(cfg, proxyReq.URL)
 	// Apply proxy if configured
 	if strings.TrimSpace(proxyURL) != "" {
 		// Clone the client and replace transport for this request
 		clientWithProxy := &http.Client{
-			Timeout: httpClient.Timeout,
+			Timeout: client.Timeout,
 		}
 
 		transport, err := CreateProxyTransport(proxyURL)
 		if err != nil {
 			logger.Warn("Failed to create proxy transport: %v, using direct connection", err)
-			clientWithProxy.Transport = httpClient.Transport
+			clientWithProxy.Transport = client.Transport
 		} else {
 			clientWithProxy.Transport = transport
 		}
@@ -547,12 +557,12 @@ func sendRequest(ctx context.Context, proxyReq *http.Request, httpClient *http.C
 		return clientWithProxy.Do(proxyReq)
 	}
 
-	return httpClient.Do(proxyReq)
+	return client.Do(proxyReq)
 }
 
-func sendRequestWithResponseHeaderTimeout(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config, responseHeaderTimeout time.Duration) (*http.Response, error) {
+func sendRequestWithResponseHeaderTimeout(ctx context.Context, proxyReq *http.Request, httpClient *http.Client, cfg *config.Config, responseHeaderTimeout time.Duration, useClientTimeout bool) (*http.Response, error) {
 	if responseHeaderTimeout <= 0 {
-		return sendRequest(ctx, proxyReq, httpClient, cfg)
+		return sendRequestWithClientTimeout(ctx, proxyReq, httpClient, cfg, useClientTimeout)
 	}
 
 	requestCtx, cancel := context.WithCancel(ctx)
@@ -562,7 +572,7 @@ func sendRequestWithResponseHeaderTimeout(ctx context.Context, proxyReq *http.Re
 		cancel()
 	})
 
-	resp, err := sendRequest(requestCtx, proxyReq, httpClient, cfg)
+	resp, err := sendRequestWithClientTimeout(requestCtx, proxyReq, httpClient, cfg, useClientTimeout)
 	if err != nil {
 		timer.Stop()
 		cancel()

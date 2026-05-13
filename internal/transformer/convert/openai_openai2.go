@@ -690,35 +690,30 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 			// Handle [DONE] if finish_reason wasn't received
 			var result strings.Builder
 			writeEvent := func(evt map[string]interface{}) {
-				d, _ := json.Marshal(evt)
-				result.WriteString(fmt.Sprintf("data: %s\n\n", d))
+				writeOpenAI2StreamEvent(ctx, &result, evt)
 			}
 			if ctx.ReasoningOutputStarted && !ctx.ReasoningOutputDone {
-				writeEvent(map[string]interface{}{"type": "response.reasoning_text.done", "output_index": ctx.ReasoningOutputIndex, "content_index": 0, "text": ctx.ReasoningText})
+				writeEvent(map[string]interface{}{
+					"type":          "response.reasoning_text.done",
+					"output_index":  ctx.ReasoningOutputIndex,
+					"content_index": 0,
+					"item_id":       openAI2OutputItemID(ctx, ctx.ReasoningOutputIndex),
+					"text":          ctx.ReasoningText,
+				})
 				writeEvent(map[string]interface{}{
 					"type":         "response.output_item.done",
 					"output_index": ctx.ReasoningOutputIndex,
-					"item": map[string]interface{}{
-						"type":    "reasoning",
-						"status":  "completed",
-						"summary": []map[string]interface{}{{"type": "summary_text", "text": ctx.ReasoningText}},
-					},
+					"item":         openAI2ReasoningItem(ctx, ctx.ReasoningOutputIndex, "completed"),
 				})
 				ctx.ReasoningOutputDone = true
 			}
 			if ctx.ContentBlockStarted {
 				outputIndex := responseMessageOutputIndex(ctx)
-				writeEvent(map[string]interface{}{"type": "response.output_text.done", "output_index": outputIndex, "content_index": 0})
-				writeEvent(map[string]interface{}{"type": "response.content_part.done", "output_index": outputIndex, "content_index": 0, "part": map[string]interface{}{"type": "output_text"}})
-				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": outputIndex, "item": map[string]interface{}{"type": "message", "role": "assistant", "status": "completed"}})
+				writeEvent(openAI2TextDoneEvent(ctx, outputIndex))
+				writeEvent(openAI2ContentPartDoneEvent(ctx, outputIndex))
+				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": outputIndex, "item": openAI2MessageItem(ctx, outputIndex, "completed")})
 			}
-			writeEvent(map[string]interface{}{
-				"type": "response.completed",
-				"response": map[string]interface{}{
-					"id": ctx.MessageID, "object": "response", "status": "completed",
-					"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens, "total_tokens": ctx.InputTokens + ctx.OutputTokens},
-				},
-			})
+			writeEvent(openAI2CompletedEvent(ctx, 0))
 			result.WriteString("data: [DONE]\n\n")
 			return []byte(result.String()), nil
 		}
@@ -740,25 +735,34 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 	if err := json.Unmarshal([]byte(jsonData), &chunk); err != nil {
 		return nil, nil
 	}
+	if chunk.Usage != nil {
+		if chunk.Usage.PromptTokens > 0 {
+			ctx.InputTokens = chunk.Usage.PromptTokens
+		}
+		if chunk.Usage.CompletionTokens > 0 {
+			ctx.OutputTokens = chunk.Usage.CompletionTokens
+		}
+	}
 
 	var result strings.Builder
 	writeEvent := func(evt map[string]interface{}) {
-		d, _ := json.Marshal(evt)
-		result.WriteString(fmt.Sprintf("data: %s\n\n", d))
+		writeOpenAI2StreamEvent(ctx, &result, evt)
 	}
 	writeReasoningDone := func() {
 		if !ctx.ReasoningOutputStarted || ctx.ReasoningOutputDone {
 			return
 		}
-		writeEvent(map[string]interface{}{"type": "response.reasoning_text.done", "output_index": ctx.ReasoningOutputIndex, "content_index": 0, "text": ctx.ReasoningText})
+		writeEvent(map[string]interface{}{
+			"type":          "response.reasoning_text.done",
+			"output_index":  ctx.ReasoningOutputIndex,
+			"content_index": 0,
+			"item_id":       openAI2OutputItemID(ctx, ctx.ReasoningOutputIndex),
+			"text":          ctx.ReasoningText,
+		})
 		writeEvent(map[string]interface{}{
 			"type":         "response.output_item.done",
 			"output_index": ctx.ReasoningOutputIndex,
-			"item": map[string]interface{}{
-				"type":    "reasoning",
-				"status":  "completed",
-				"summary": []map[string]interface{}{{"type": "summary_text", "text": ctx.ReasoningText}},
-			},
+			"item":         openAI2ReasoningItem(ctx, ctx.ReasoningOutputIndex, "completed"),
 		})
 		ctx.ReasoningOutputDone = true
 	}
@@ -766,10 +770,7 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 	if !ctx.MessageStartSent {
 		ctx.MessageStartSent = true
 		ctx.MessageID = chunk.ID
-		writeEvent(map[string]interface{}{
-			"type":     "response.created",
-			"response": map[string]interface{}{"id": chunk.ID, "object": "response", "status": "in_progress"},
-		})
+		writeEvent(openAI2CreatedEvent(ctx))
 	}
 
 	if len(chunk.Choices) > 0 {
@@ -788,14 +789,16 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 				writeEvent(map[string]interface{}{
 					"type":         "response.output_item.added",
 					"output_index": ctx.ReasoningOutputIndex,
-					"item":         map[string]interface{}{"type": "reasoning", "status": "in_progress", "summary": []interface{}{}},
+					"item":         openAI2ReasoningItem(ctx, ctx.ReasoningOutputIndex, "in_progress"),
 				})
 			}
 			ctx.ReasoningText += delta.ReasoningContent
+			recordOpenAI2Reasoning(ctx, ctx.ReasoningOutputIndex, delta.ReasoningContent)
 			writeEvent(map[string]interface{}{
 				"type":          "response.reasoning_text.delta",
 				"output_index":  ctx.ReasoningOutputIndex,
 				"content_index": 0,
+				"item_id":       openAI2OutputItemID(ctx, ctx.ReasoningOutputIndex),
 				"delta":         delta.ReasoningContent,
 			})
 		}
@@ -807,14 +810,11 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 				outputIndex := responseMessageOutputIndex(ctx)
 				writeEvent(map[string]interface{}{
 					"type": "response.output_item.added", "output_index": outputIndex,
-					"item": map[string]interface{}{"type": "message", "role": "assistant", "status": "in_progress", "content": []interface{}{}},
+					"item": openAI2MessageItem(ctx, outputIndex, "in_progress"),
 				})
-				writeEvent(map[string]interface{}{
-					"type": "response.content_part.added", "output_index": outputIndex, "content_index": 0,
-					"part": map[string]interface{}{"type": "output_text", "text": ""},
-				})
+				writeEvent(openAI2ContentPartAddedEvent(ctx, outputIndex))
 			}
-			writeEvent(map[string]interface{}{"type": "response.output_text.delta", "output_index": responseMessageOutputIndex(ctx), "content_index": 0, "delta": delta.Content})
+			writeEvent(openAI2TextDeltaEvent(ctx, responseMessageOutputIndex(ctx), delta.Content))
 		}
 
 		// Handle tool calls
@@ -829,16 +829,23 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 				ctx.CurrentToolID = tc.ID
 				ctx.CurrentToolName = tc.Function.Name
 				ctx.ToolArguments = ""
+				outputIndex := responseToolOutputIndex(ctx, idx)
+				recordOpenAI2ToolCall(ctx, outputIndex, tc.ID, tc.Function.Name)
 				writeEvent(map[string]interface{}{
-					"type": "response.output_item.added", "output_index": responseToolOutputIndex(ctx, idx),
-					"item": map[string]interface{}{"type": "function_call", "call_id": tc.ID, "name": tc.Function.Name, "arguments": "", "status": "in_progress"},
+					"type": "response.output_item.added", "output_index": outputIndex,
+					"item": openAI2ToolItem(ctx, outputIndex, "in_progress"),
 				})
 			}
 			// Accumulate arguments
 			if tc.Function.Arguments != "" {
 				ctx.ToolArguments += tc.Function.Arguments
+				outputIndex := responseToolOutputIndex(ctx, idx)
+				recordOpenAI2ToolArguments(ctx, outputIndex, tc.Function.Arguments)
 				writeEvent(map[string]interface{}{
-					"type": "response.function_call_arguments.delta", "output_index": responseToolOutputIndex(ctx, idx), "delta": tc.Function.Arguments,
+					"type":         "response.function_call_arguments.delta",
+					"output_index": outputIndex,
+					"item_id":      openAI2OutputItemID(ctx, outputIndex),
+					"delta":        tc.Function.Arguments,
 				})
 			}
 		}
@@ -848,25 +855,27 @@ func OpenAIStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 			writeReasoningDone()
 			if ctx.ContentBlockStarted {
 				outputIndex := responseMessageOutputIndex(ctx)
-				writeEvent(map[string]interface{}{"type": "response.output_text.done", "output_index": outputIndex, "content_index": 0})
-				writeEvent(map[string]interface{}{"type": "response.content_part.done", "output_index": outputIndex, "content_index": 0, "part": map[string]interface{}{"type": "output_text"}})
-				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": outputIndex, "item": map[string]interface{}{"type": "message", "role": "assistant", "status": "completed"}})
+				writeEvent(openAI2TextDoneEvent(ctx, outputIndex))
+				writeEvent(openAI2ContentPartDoneEvent(ctx, outputIndex))
+				writeEvent(map[string]interface{}{"type": "response.output_item.done", "output_index": outputIndex, "item": openAI2MessageItem(ctx, outputIndex, "completed")})
 				ctx.ContentBlockStarted = false
 			}
 			if *finishReason == "tool_calls" && ctx.CurrentToolID != "" {
-				writeEvent(map[string]interface{}{"type": "response.function_call_arguments.done", "output_index": responseToolOutputIndex(ctx, 0), "arguments": ctx.ToolArguments})
+				outputIndex := responseToolOutputIndex(ctx, 0)
 				writeEvent(map[string]interface{}{
-					"type": "response.output_item.done", "output_index": responseToolOutputIndex(ctx, 0),
-					"item": map[string]interface{}{"type": "function_call", "call_id": ctx.CurrentToolID, "name": ctx.CurrentToolName, "arguments": ctx.ToolArguments, "status": "completed"},
+					"type":         "response.function_call_arguments.done",
+					"output_index": outputIndex,
+					"item_id":      openAI2OutputItemID(ctx, outputIndex),
+					"name":         ctx.CurrentToolName,
+					"arguments":    ctx.ToolArguments,
+				})
+				writeEvent(map[string]interface{}{
+					"type":         "response.output_item.done",
+					"output_index": outputIndex,
+					"item":         openAI2ToolItem(ctx, outputIndex, "completed"),
 				})
 			}
-			writeEvent(map[string]interface{}{
-				"type": "response.completed",
-				"response": map[string]interface{}{
-					"id": ctx.MessageID, "object": "response", "status": "completed",
-					"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens, "total_tokens": ctx.InputTokens + ctx.OutputTokens},
-				},
-			})
+			writeEvent(openAI2CompletedEvent(ctx, 0))
 			result.WriteString("data: [DONE]\n\n")
 			ctx.FinishReasonSent = true
 		}

@@ -205,6 +205,14 @@ type StreamContext struct {
 	CurrentToolID   string // Current tool call ID being processed
 	CurrentToolName string // Current tool call name being processed
 	ToolArguments   string // Accumulated tool arguments
+	// OpenAI Responses streaming accumulation
+	ResponseSequenceNumber       int
+	ResponseOutputItemIDByIndex  map[int]string
+	ResponseTextByIndex          map[int]string
+	ResponseToolCallIDByIndex    map[int]string
+	ResponseToolNameByIndex      map[int]string
+	ResponseToolArgumentsByIndex map[int]string
+	ResponseReasoningByIndex     map[int]string
 	// <think> tag handling for streaming text
 	InThinkingTag       bool   // Track if we are inside a <think> tag
 	ThinkingBuffer      string // Buffer for trailing partial tag detection
@@ -215,32 +223,38 @@ type StreamContext struct {
 // NewStreamContext creates a new stream context with default values
 func NewStreamContext() *StreamContext {
 	return &StreamContext{
-		MessageStartSent:       false,
-		ContentBlockStarted:    false,
-		ThinkingBlockStarted:   false,
-		ReasoningOutputStarted: false,
-		ReasoningOutputDone:    false,
-		ToolBlockStarted:       false,
-		ToolBlockPending:       false,
-		MessageID:              "",
-		ModelName:              "",
-		InputTokens:            0,
-		OutputTokens:           0,
-		ContentIndex:           0,
-		ThinkingIndex:          0,
-		ReasoningOutputIndex:   0,
-		ToolIndex:              0,
-		LastToolIndex:          0,
-		FinishReasonSent:       false,
-		EnableThinking:         false,
-		CurrentToolCall:        nil,
-		ToolCallBuffer:         "",
-		ToolCallIDMap:          make(map[string]string),
-		ToolCallCounter:        0,
-		InThinkingTag:          false,
-		ThinkingBuffer:         "",
-		PendingThinkingText:    "",
-		ReasoningText:          "",
+		MessageStartSent:             false,
+		ContentBlockStarted:          false,
+		ThinkingBlockStarted:         false,
+		ReasoningOutputStarted:       false,
+		ReasoningOutputDone:          false,
+		ToolBlockStarted:             false,
+		ToolBlockPending:             false,
+		MessageID:                    "",
+		ModelName:                    "",
+		InputTokens:                  0,
+		OutputTokens:                 0,
+		ContentIndex:                 0,
+		ThinkingIndex:                0,
+		ReasoningOutputIndex:         0,
+		ToolIndex:                    0,
+		LastToolIndex:                0,
+		FinishReasonSent:             false,
+		EnableThinking:               false,
+		CurrentToolCall:              nil,
+		ToolCallBuffer:               "",
+		ToolCallIDMap:                make(map[string]string),
+		ToolCallCounter:              0,
+		ResponseOutputItemIDByIndex:  make(map[int]string),
+		ResponseTextByIndex:          make(map[int]string),
+		ResponseToolCallIDByIndex:    make(map[int]string),
+		ResponseToolNameByIndex:      make(map[int]string),
+		ResponseToolArgumentsByIndex: make(map[int]string),
+		ResponseReasoningByIndex:     make(map[int]string),
+		InThinkingTag:                false,
+		ThinkingBuffer:               "",
+		PendingThinkingText:          "",
+		ReasoningText:                "",
 	}
 }
 

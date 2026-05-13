@@ -693,11 +693,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		logRequestAttemptStart(obs, endpoint.Name, action, modelName, reqBytes, attemptNumber, proxyLabel)
 
 		ctx := r.Context()
+		upstreamStreaming := streamReq.Stream || shouldAggregateStreamingAsNonStreaming(endpoint, transformerName)
 		responseHeaderTimeout := time.Duration(0)
-		if streamReq.Stream || shouldAggregateStreamingAsNonStreaming(endpoint, transformerName) {
+		if upstreamStreaming {
 			responseHeaderTimeout = p.streamHeaderTimeoutOrDefault()
 		}
-		resp, err := sendRequestWithResponseHeaderTimeout(ctx, proxyReq, p.httpClient, p.config, responseHeaderTimeout)
+		resp, err := sendRequestWithResponseHeaderTimeout(ctx, proxyReq, p.httpClient, p.config, responseHeaderTimeout, !upstreamStreaming)
 		if err != nil {
 			if isClientCanceled(ctx, err) {
 				logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, 0, "client_canceled", "Client canceled request: %v", err)
@@ -847,14 +848,47 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 					}
 					continue
 				}
-				logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, retryReason, "Streaming response failed: %v", streamResult.Err)
-				if retryReason == streamFinishUpstreamStreamError && streamResult.WroteSemanticData && streamSession != nil && streamSession.Started() {
-					message := fmt.Sprintf("Upstream stream interrupted: %v", streamResult.Err)
-					if writeErr := streamSession.WriteTypedError(streamFinishUpstreamStreamError, message); writeErr != nil {
-						logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, streamFinishDownstreamWriteFailed, "Failed to write upstream stream error to downstream: %v", writeErr)
+				if retryReason == streamFinishUpstreamStreamError {
+					if streamResult.WroteSemanticData {
+						logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, retryReason, "Streaming response failed after semantic output: %v", streamResult.Err)
+						if streamSession != nil && streamSession.Started() {
+							message := fmt.Sprintf("Upstream stream interrupted: %v", streamResult.Err)
+							if writeErr := streamSession.WriteTypedError(streamFinishUpstreamStreamError, message); writeErr != nil {
+								logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, streamFinishDownstreamWriteFailed, "Failed to write upstream stream error to downstream: %v", writeErr)
+							}
+							streamSession.Close()
+						}
+						p.markCredentialFailure(credentialID, 0, streamResult.Err.Error())
+						p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
+						p.recordEndpointError(endpoint.Name, retryReason)
+						p.markRequestInactive(endpoint.Name)
+						return
 					}
-					streamSession.Close()
+
+					logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, retryReason, "Streaming response failed before semantic output: %v", streamResult.Err)
+					p.markCredentialFailure(credentialID, 0, streamResult.Err.Error())
+					p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
+					p.recordEndpointError(endpoint.Name, retryReason)
+					p.markRequestInactive(endpoint.Name)
+					if endpointAttempts >= endpointFastFailoverAttempts {
+						p.markEndpointCooldownForReason(endpoint.Name, retryReason, resp.Header, obs, attemptNumber)
+						if useSpecificEndpoint {
+							if streamSession != nil && streamSession.Started() {
+								message := fmt.Sprintf("Upstream stream interrupted before output: %v", streamResult.Err)
+								_ = streamSession.WriteTypedError(streamFinishUpstreamStreamError, message)
+							}
+							return
+						}
+						p.advanceRequestEndpoint(requestPlan, endpoint, obs, attemptNumber, retryReason)
+						endpointAttempts = 0
+					} else {
+						logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, retryReason, "Retryable streaming response failure before semantic output, retrying same endpoint: %v", streamResult.Err)
+						p.sleepBeforeRetry(300 * time.Millisecond)
+					}
+					continue
 				}
+
+				logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, http.StatusOK, retryReason, "Streaming response failed: %v", streamResult.Err)
 				p.markCredentialFailure(credentialID, 0, streamResult.Err.Error())
 				p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 				p.recordEndpointError(endpoint.Name, retryReason)

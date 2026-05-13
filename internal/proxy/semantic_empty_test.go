@@ -249,6 +249,48 @@ func TestStreamingSemanticEmptyRetriesAfterDownstreamHeartbeat(t *testing.T) {
 	}
 }
 
+func TestStreamingTextDeltaWithCompletedOutputIsNotSemanticEmpty(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.created","sequence_number":1,"response":{"id":"resp-ok","object":"response","status":"in_progress","output":[]}}`,
+			"",
+			`data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"message","id":"msg_resp-ok_0","role":"assistant","status":"in_progress","content":[]}}`,
+			"",
+			`data: {"type":"response.content_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"msg_resp-ok_0","part":{"type":"output_text","text":""}}`,
+			"",
+			`data: {"type":"response.output_text.delta","sequence_number":4,"output_index":0,"content_index":0,"item_id":"msg_resp-ok_0","logprobs":[],"delta":"ok"}`,
+			"",
+			`data: {"type":"response.completed","sequence_number":5,"response":{"id":"resp-ok","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[{"type":"message","id":"msg_resp-ok_0","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected streaming response to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected valid stream not to retry as semantic empty, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), `"text":"ok"`) {
+		t.Fatalf("expected completed output text to reach client, got %q", rec.Body.String())
+	}
+}
+
 func TestTokenPoolSemanticEmptySoftCoolsCredentialAndRetriesNextToken(t *testing.T) {
 	var tokens []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

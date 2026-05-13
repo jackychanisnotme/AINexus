@@ -342,8 +342,7 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 
 	var result strings.Builder
 	writeEvent := func(evt map[string]interface{}) {
-		d, _ := json.Marshal(evt)
-		result.WriteString(fmt.Sprintf("data: %s\n\n", d))
+		writeOpenAI2StreamEvent(ctx, &result, evt)
 	}
 
 	switch eventType {
@@ -356,12 +355,7 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 				}
 			}
 		}
-		writeEvent(map[string]interface{}{
-			"type": "response.created",
-			"response": map[string]interface{}{
-				"id": ctx.MessageID, "object": "response", "status": "in_progress",
-			},
-		})
+		writeEvent(openAI2CreatedEvent(ctx))
 
 	case "content_block_start":
 		block, ok := data["content_block"].(map[string]interface{})
@@ -378,29 +372,20 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 			// output_item.added
 			writeEvent(map[string]interface{}{
 				"type": "response.output_item.added", "output_index": blockIdx,
-				"item": map[string]interface{}{
-					"type": "message", "id": fmt.Sprintf("msg_%s_%d", ctx.MessageID, blockIdx),
-					"role": "assistant", "status": "in_progress", "content": []interface{}{},
-				},
+				"item": openAI2MessageItem(ctx, blockIdx, "in_progress"),
 			})
 			// content_part.added
-			writeEvent(map[string]interface{}{
-				"type": "response.content_part.added", "output_index": blockIdx, "content_index": 0,
-				"part": map[string]interface{}{"type": "output_text", "text": ""},
-			})
+			writeEvent(openAI2ContentPartAddedEvent(ctx, blockIdx))
 		case "tool_use":
 			ctx.ToolBlockStarted = true
 			ctx.ToolIndex = blockIdx
 			ctx.CurrentToolID, _ = block["id"].(string)
 			ctx.CurrentToolName, _ = block["name"].(string)
+			recordOpenAI2ToolCall(ctx, blockIdx, ctx.CurrentToolID, ctx.CurrentToolName)
 			// output_item.added for function_call
 			writeEvent(map[string]interface{}{
 				"type": "response.output_item.added", "output_index": blockIdx,
-				"item": map[string]interface{}{
-					"type": "function_call", "id": ctx.CurrentToolID,
-					"call_id": ctx.CurrentToolID, "name": ctx.CurrentToolName,
-					"arguments": "", "status": "in_progress",
-				},
+				"item": openAI2ToolItem(ctx, blockIdx, "in_progress"),
 			})
 		}
 
@@ -411,16 +396,17 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 		}
 		switch delta["type"] {
 		case "text_delta":
-			writeEvent(map[string]interface{}{
-				"type": "response.output_text.delta", "output_index": ctx.ContentIndex,
-				"content_index": 0, "delta": delta["text"],
-			})
+			text, _ := delta["text"].(string)
+			writeEvent(openAI2TextDeltaEvent(ctx, ctx.ContentIndex, text))
 		case "input_json_delta":
-			partial := delta["partial_json"].(string)
+			partial, _ := delta["partial_json"].(string)
 			ctx.ToolArguments += partial
+			recordOpenAI2ToolArguments(ctx, ctx.ToolIndex, partial)
 			writeEvent(map[string]interface{}{
 				"type":         "response.function_call_arguments.delta",
-				"output_index": ctx.ToolIndex, "delta": partial,
+				"output_index": ctx.ToolIndex,
+				"item_id":      openAI2OutputItemID(ctx, ctx.ToolIndex),
+				"delta":        partial,
 			})
 		}
 
@@ -432,36 +418,29 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 			// function_call_arguments.done
 			writeEvent(map[string]interface{}{
 				"type":         "response.function_call_arguments.done",
-				"output_index": blockIdx, "arguments": ctx.ToolArguments,
+				"output_index": blockIdx,
+				"item_id":      openAI2OutputItemID(ctx, blockIdx),
+				"name":         ctx.CurrentToolName,
+				"arguments":    ctx.ToolArguments,
 			})
 			// output_item.done for function_call
 			writeEvent(map[string]interface{}{
-				"type": "response.output_item.done", "output_index": blockIdx,
-				"item": map[string]interface{}{
-					"type": "function_call", "id": ctx.CurrentToolID,
-					"call_id": ctx.CurrentToolID, "name": ctx.CurrentToolName,
-					"arguments": ctx.ToolArguments, "status": "completed",
-				},
+				"type":         "response.output_item.done",
+				"output_index": blockIdx,
+				"item":         openAI2ToolItem(ctx, blockIdx, "completed"),
 			})
 			ctx.ToolBlockStarted = false
 			ctx.ToolArguments = ""
 		} else if ctx.ContentBlockStarted && blockIdx == ctx.ContentIndex {
-			// output_text.done - need accumulated text, use empty for now
-			writeEvent(map[string]interface{}{
-				"type": "response.output_text.done", "output_index": blockIdx, "content_index": 0,
-			})
+			// output_text.done
+			writeEvent(openAI2TextDoneEvent(ctx, blockIdx))
 			// content_part.done
-			writeEvent(map[string]interface{}{
-				"type": "response.content_part.done", "output_index": blockIdx, "content_index": 0,
-				"part": map[string]interface{}{"type": "output_text"},
-			})
+			writeEvent(openAI2ContentPartDoneEvent(ctx, blockIdx))
 			// output_item.done
 			writeEvent(map[string]interface{}{
-				"type": "response.output_item.done", "output_index": blockIdx,
-				"item": map[string]interface{}{
-					"type": "message", "id": fmt.Sprintf("msg_%s_%d", ctx.MessageID, blockIdx),
-					"role": "assistant", "status": "completed",
-				},
+				"type":         "response.output_item.done",
+				"output_index": blockIdx,
+				"item":         openAI2MessageItem(ctx, blockIdx, "completed"),
 			})
 			ctx.ContentBlockStarted = false
 		}
@@ -474,16 +453,7 @@ func ClaudeStreamToOpenAI2(event []byte, ctx *transformer.StreamContext) ([]byte
 		}
 
 	case "message_stop":
-		writeEvent(map[string]interface{}{
-			"type": "response.completed",
-			"response": map[string]interface{}{
-				"id": ctx.MessageID, "object": "response", "status": "completed",
-				"usage": map[string]interface{}{
-					"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens,
-					"total_tokens": ctx.InputTokens + ctx.OutputTokens,
-				},
-			},
-		})
+		writeEvent(openAI2CompletedEvent(ctx, 0))
 		result.WriteString("data: [DONE]\n\n")
 	}
 
