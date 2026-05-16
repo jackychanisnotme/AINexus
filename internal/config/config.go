@@ -200,10 +200,20 @@ type FailoverCooldownConfig struct {
 	ConfigErrorSec      int `json:"configErrorSec"`
 }
 
+// FailoverCircuitBreakerConfig controls fast endpoint isolation for repeated failures.
+type FailoverCircuitBreakerConfig struct {
+	ConsecutiveFailures  int     `json:"consecutiveFailures"`
+	WindowSec            int     `json:"windowSec"`
+	FailureRateThreshold float64 `json:"failureRateThreshold"`
+	MinRequests          int     `json:"minRequests"`
+	CooldownSec          int     `json:"cooldownSec"`
+}
+
 // FailoverConfig controls request-local fallback and recovered endpoint handling.
 type FailoverConfig struct {
-	RecoveredEndpointPolicy string                  `json:"recoveredEndpointPolicy"`
-	Cooldowns               *FailoverCooldownConfig `json:"cooldowns,omitempty"`
+	RecoveredEndpointPolicy string                        `json:"recoveredEndpointPolicy"`
+	Cooldowns               *FailoverCooldownConfig       `json:"cooldowns,omitempty"`
+	CircuitBreaker          *FailoverCircuitBreakerConfig `json:"circuitBreaker,omitempty"`
 }
 
 // Config represents the application configuration
@@ -249,6 +259,13 @@ func DefaultFailoverConfig() *FailoverConfig {
 			TokenUnavailableSec: 600,
 			ConfigErrorSec:      1800,
 		},
+		CircuitBreaker: &FailoverCircuitBreakerConfig{
+			ConsecutiveFailures:  3,
+			WindowSec:            60,
+			FailureRateThreshold: 0.60,
+			MinRequests:          5,
+			CooldownSec:          600,
+		},
 	}
 }
 
@@ -262,6 +279,7 @@ func NormalizeFailoverConfig(failover *FailoverConfig) *FailoverConfig {
 	normalized := &FailoverConfig{
 		RecoveredEndpointPolicy: strings.TrimSpace(failover.RecoveredEndpointPolicy),
 		Cooldowns:               &FailoverCooldownConfig{},
+		CircuitBreaker:          &FailoverCircuitBreakerConfig{},
 	}
 	if normalized.RecoveredEndpointPolicy != RecoveredEndpointPolicyAutoReturn &&
 		normalized.RecoveredEndpointPolicy != RecoveredEndpointPolicyDeprioritize {
@@ -277,12 +295,27 @@ func NormalizeFailoverConfig(failover *FailoverConfig) *FailoverConfig {
 		normalized.Cooldowns.TokenUnavailableSec = normalizeCooldownSeconds(failover.Cooldowns.TokenUnavailableSec, defaults.Cooldowns.TokenUnavailableSec)
 		normalized.Cooldowns.ConfigErrorSec = normalizeCooldownSeconds(failover.Cooldowns.ConfigErrorSec, defaults.Cooldowns.ConfigErrorSec)
 	}
+	*normalized.CircuitBreaker = *defaults.CircuitBreaker
+	if failover.CircuitBreaker != nil {
+		normalized.CircuitBreaker.ConsecutiveFailures = normalizeCooldownSeconds(failover.CircuitBreaker.ConsecutiveFailures, defaults.CircuitBreaker.ConsecutiveFailures)
+		normalized.CircuitBreaker.WindowSec = normalizeCooldownSeconds(failover.CircuitBreaker.WindowSec, defaults.CircuitBreaker.WindowSec)
+		normalized.CircuitBreaker.FailureRateThreshold = normalizeFailureRateThreshold(failover.CircuitBreaker.FailureRateThreshold, defaults.CircuitBreaker.FailureRateThreshold)
+		normalized.CircuitBreaker.MinRequests = normalizeCooldownSeconds(failover.CircuitBreaker.MinRequests, defaults.CircuitBreaker.MinRequests)
+		normalized.CircuitBreaker.CooldownSec = normalizeCooldownSeconds(failover.CircuitBreaker.CooldownSec, defaults.CircuitBreaker.CooldownSec)
+	}
 
 	return normalized
 }
 
 func normalizeCooldownSeconds(value int, defaultValue int) int {
 	if value < 0 {
+		return defaultValue
+	}
+	return value
+}
+
+func normalizeFailureRateThreshold(value float64, defaultValue float64) float64 {
+	if value < 0 || value > 1 {
 		return defaultValue
 	}
 	return value
@@ -959,6 +992,23 @@ func LoadFromStorage(storage StorageAdapter) (*Config, error) {
 	loadFailoverCooldown("failover_cooldown_configErrorSec", func(value int) {
 		config.Failover.Cooldowns.ConfigErrorSec = value
 	})
+	loadFailoverCooldown("failover_circuitBreaker_consecutiveFailures", func(value int) {
+		config.Failover.CircuitBreaker.ConsecutiveFailures = value
+	})
+	loadFailoverCooldown("failover_circuitBreaker_windowSec", func(value int) {
+		config.Failover.CircuitBreaker.WindowSec = value
+	})
+	if valueStr, err := storage.GetConfig("failover_circuitBreaker_failureRateThreshold"); err == nil && valueStr != "" {
+		if value, parseErr := strconv.ParseFloat(valueStr, 64); parseErr == nil {
+			config.Failover.CircuitBreaker.FailureRateThreshold = value
+		}
+	}
+	loadFailoverCooldown("failover_circuitBreaker_minRequests", func(value int) {
+		config.Failover.CircuitBreaker.MinRequests = value
+	})
+	loadFailoverCooldown("failover_circuitBreaker_cooldownSec", func(value int) {
+		config.Failover.CircuitBreaker.CooldownSec = value
+	})
 	config.Failover = NormalizeFailoverConfig(config.Failover)
 
 	// Load Claude notification config
@@ -1223,6 +1273,21 @@ func (c *Config) SaveToStorage(storage StorageAdapter) error {
 	}
 	if err := storage.SetConfig("failover_cooldown_configErrorSec", strconv.Itoa(failover.Cooldowns.ConfigErrorSec)); err != nil {
 		return fmt.Errorf("failed to save failover_cooldown_configErrorSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_circuitBreaker_consecutiveFailures", strconv.Itoa(failover.CircuitBreaker.ConsecutiveFailures)); err != nil {
+		return fmt.Errorf("failed to save failover_circuitBreaker_consecutiveFailures config: %w", err)
+	}
+	if err := storage.SetConfig("failover_circuitBreaker_windowSec", strconv.Itoa(failover.CircuitBreaker.WindowSec)); err != nil {
+		return fmt.Errorf("failed to save failover_circuitBreaker_windowSec config: %w", err)
+	}
+	if err := storage.SetConfig("failover_circuitBreaker_failureRateThreshold", strconv.FormatFloat(failover.CircuitBreaker.FailureRateThreshold, 'f', -1, 64)); err != nil {
+		return fmt.Errorf("failed to save failover_circuitBreaker_failureRateThreshold config: %w", err)
+	}
+	if err := storage.SetConfig("failover_circuitBreaker_minRequests", strconv.Itoa(failover.CircuitBreaker.MinRequests)); err != nil {
+		return fmt.Errorf("failed to save failover_circuitBreaker_minRequests config: %w", err)
+	}
+	if err := storage.SetConfig("failover_circuitBreaker_cooldownSec", strconv.Itoa(failover.CircuitBreaker.CooldownSec)); err != nil {
+		return fmt.Errorf("failed to save failover_circuitBreaker_cooldownSec config: %w", err)
 	}
 
 	// Save Claude notification config

@@ -101,6 +101,32 @@ func TestResponsesFunctionCallOnlyIsNotSemanticEmpty(t *testing.T) {
 	}
 }
 
+func TestResponsesToolLikeOutputOnlyIsNotSemanticEmpty(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-tool","object":"response","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7},"output":[{"type":"custom_tool_call","id":"call_1","call_id":"call_1","name":"apply_patch","input":"patch"}]}`))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected custom_tool_call-only response to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected no retry for custom_tool_call output, got hits=%d", hits)
+	}
+}
+
 func TestOpenAIChatEmptyMessageRetriesAndToolCallsAreValid(t *testing.T) {
 	var emptyHits int
 	emptyThenOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +314,59 @@ func TestStreamingTextDeltaWithCompletedOutputIsNotSemanticEmpty(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"text":"ok"`) {
 		t.Fatalf("expected completed output text to reach client, got %q", rec.Body.String())
+	}
+}
+
+func TestStreamingOpenAIChatCompletedOnlyOutputIsNotSemanticEmpty(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.completed","response":{"id":"resp-ok","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected streaming response to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected valid completed-only stream not to retry as semantic empty, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), `"content":"ok"`) {
+		t.Fatalf("expected completed output text to be converted to chat content, got %q", rec.Body.String())
+	}
+}
+
+func TestSemanticStreamOutputTextDoneIsOutput(t *testing.T) {
+	inspection := inspectSemanticStreamEvent([]byte(`data: {"type":"response.output_text.done","text":"ok"}`))
+	if !inspection.HasOutput {
+		t.Fatalf("expected output_text.done text to count as semantic output")
+	}
+}
+
+func TestSemanticStreamCustomToolCallIsOutput(t *testing.T) {
+	inspection := inspectSemanticStreamEvent([]byte(`data: {"type":"response.output_item.done","item":{"type":"custom_tool_call","id":"call_1","call_id":"call_1","name":"apply_patch","input":"patch"}}`))
+	if !inspection.HasOutput {
+		t.Fatalf("expected custom_tool_call item to count as semantic output")
+	}
+
+	inspection = inspectSemanticStreamEvent([]byte(`data: {"type":"response.custom_tool_call_input.delta","delta":"patch"}`))
+	if !inspection.HasOutput {
+		t.Fatalf("expected custom_tool_call_input delta to count as semantic output")
 	}
 }
 

@@ -483,9 +483,6 @@ export async function renderEndpoints(endpoints) {
         const switchBtn = item.querySelector('[data-action="switch"]');
         bindEndpointSwitchButton(switchBtn);
 
-        // Add drag and drop event listeners
-        setupDragAndDrop(item, container);
-
         container.appendChild(item);
     });
 }
@@ -1832,9 +1829,6 @@ function renderCompactView(sortedEndpoints, container, currentEndpointName, isFi
 
         // 绑定事件
         bindCompactItemEvents(item, index, enabled);
-
-        // 设置拖拽
-        setupCompactDragAndDrop(item, container);
 
         container.appendChild(item);
     });

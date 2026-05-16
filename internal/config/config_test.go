@@ -94,6 +94,13 @@ func TestLoadFromStorageUsesDefaultFailover(t *testing.T) {
 		failover.Cooldowns.ConfigErrorSec != 1800 {
 		t.Fatalf("unexpected default cooldowns: %#v", failover.Cooldowns)
 	}
+	if failover.CircuitBreaker.ConsecutiveFailures != 3 ||
+		failover.CircuitBreaker.WindowSec != 60 ||
+		failover.CircuitBreaker.FailureRateThreshold != 0.60 ||
+		failover.CircuitBreaker.MinRequests != 5 ||
+		failover.CircuitBreaker.CooldownSec != 600 {
+		t.Fatalf("unexpected default circuit breaker: %#v", failover.CircuitBreaker)
+	}
 }
 
 func TestFailoverConfigPersistsAndNormalizes(t *testing.T) {
@@ -109,6 +116,13 @@ func TestFailoverConfigPersistsAndNormalizes(t *testing.T) {
 			NetworkErrorSec:     9,
 			TokenUnavailableSec: 10,
 			ConfigErrorSec:      11,
+		},
+		CircuitBreaker: &FailoverCircuitBreakerConfig{
+			ConsecutiveFailures:  2,
+			WindowSec:            12,
+			FailureRateThreshold: 0.75,
+			MinRequests:          4,
+			CooldownSec:          300,
 		},
 	})
 
@@ -131,11 +145,21 @@ func TestFailoverConfigPersistsAndNormalizes(t *testing.T) {
 		failover.Cooldowns.ConfigErrorSec != 11 {
 		t.Fatalf("unexpected persisted cooldowns: %#v", failover.Cooldowns)
 	}
+	if failover.CircuitBreaker.ConsecutiveFailures != 2 ||
+		failover.CircuitBreaker.WindowSec != 12 ||
+		failover.CircuitBreaker.FailureRateThreshold != 0.75 ||
+		failover.CircuitBreaker.MinRequests != 4 ||
+		failover.CircuitBreaker.CooldownSec != 300 {
+		t.Fatalf("unexpected persisted circuit breaker: %#v", failover.CircuitBreaker)
+	}
 
 	cfg.UpdateFailover(&FailoverConfig{
 		RecoveredEndpointPolicy: "bad-policy",
 		Cooldowns: &FailoverCooldownConfig{
 			QuotaExhaustedSec: -1,
+		},
+		CircuitBreaker: &FailoverCircuitBreakerConfig{
+			FailureRateThreshold: 2,
 		},
 	})
 	failover = cfg.GetFailover()
@@ -144,5 +168,8 @@ func TestFailoverConfigPersistsAndNormalizes(t *testing.T) {
 	}
 	if failover.Cooldowns.QuotaExhaustedSec != 3600 {
 		t.Fatalf("expected negative cooldown to normalize to default, got %d", failover.Cooldowns.QuotaExhaustedSec)
+	}
+	if failover.CircuitBreaker.FailureRateThreshold != 0.60 {
+		t.Fatalf("expected invalid failure rate threshold to normalize to default, got %f", failover.CircuitBreaker.FailureRateThreshold)
 	}
 }

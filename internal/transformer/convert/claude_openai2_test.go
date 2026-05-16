@@ -120,6 +120,35 @@ func TestOpenAI2StreamToClaudeCompletesWithoutDone(t *testing.T) {
 	}
 }
 
+func TestOpenAI2StreamToClaudeEmitsCompletedOnlyOutput(t *testing.T) {
+	ctx := transformer.NewStreamContext()
+	ctx.ModelName = "claude-3-sonnet-20240229"
+
+	chunks := []string{
+		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","status":"in_progress"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"late answer"}]}]}}`,
+	}
+
+	var allEvents []string
+	for _, chunk := range chunks {
+		events, err := OpenAI2StreamToClaude([]byte(chunk), ctx)
+		if err != nil {
+			t.Fatalf("OpenAI2StreamToClaude failed: %v", err)
+		}
+		if events != nil {
+			allEvents = append(allEvents, string(events))
+		}
+	}
+
+	fullEvents := strings.Join(allEvents, "")
+	if !strings.Contains(fullEvents, `"text":"late answer"`) {
+		t.Fatalf("expected completed-only text to be emitted, got: %s", fullEvents)
+	}
+	if !strings.Contains(fullEvents, "event: message_stop") {
+		t.Fatalf("expected message_stop, got: %s", fullEvents)
+	}
+}
+
 func TestOpenAI2StreamToClaudePropagatesUsageFromCompleted(t *testing.T) {
 	ctx := transformer.NewStreamContext()
 	ctx.ModelName = "claude-3-sonnet-20240229"

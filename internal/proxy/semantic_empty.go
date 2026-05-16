@@ -133,12 +133,24 @@ func inspectSemanticStreamJSON(event map[string]interface{}) semanticStreamInspe
 		if hasNonEmptyString(event["delta"]) || hasNonEmptyString(event["text"]) {
 			result.HasOutput = true
 		}
+	case "response.output_text.done":
+		if hasNonEmptyString(event["text"]) || hasNonEmptyString(event["delta"]) {
+			result.HasOutput = true
+		}
 	case "response.content_part.added":
+		if part, ok := event["part"].(map[string]interface{}); ok && hasTextInOpenAI2ContentPart(part) {
+			result.HasOutput = true
+		}
+	case "response.content_part.done":
 		if part, ok := event["part"].(map[string]interface{}); ok && hasTextInOpenAI2ContentPart(part) {
 			result.HasOutput = true
 		}
 	case "response.output_item.added", "response.output_item.done":
 		if item, ok := event["item"].(map[string]interface{}); ok && hasValidResponsesOutputItem(item) {
+			result.HasOutput = true
+		}
+	case "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
+		if hasNonEmptyString(event["delta"]) || hasNonEmptyString(event["input"]) {
 			result.HasOutput = true
 		}
 	case "response.completed":
@@ -234,8 +246,10 @@ func inspectOpenAIResponsesPayload(payload map[string]interface{}) semanticRespo
 			if hasTextInOpenAI2Content(item["content"]) || hasValidToolCalls(item["tool_calls"]) {
 				inspection.HasOutput = true
 			}
-		case "function_call":
-			if hasValidResponsesFunctionCall(item) {
+		case "function_call", "custom_tool_call", "local_shell_call", "computer_call",
+			"file_search_call", "web_search_call", "mcp_call", "code_interpreter_call",
+			"image_generation_call":
+			if hasValidResponsesToolLikeOutputItem(item) {
 				inspection.HasOutput = true
 			}
 		case "reasoning":
@@ -243,7 +257,9 @@ func inspectOpenAIResponsesPayload(payload map[string]interface{}) semanticRespo
 				onlyReasoning = true
 			}
 		default:
-			if hasTextInOpenAI2Content(item["content"]) {
+			if strings.HasSuffix(itemType, "_call") && hasValidResponsesToolLikeOutputItem(item) {
+				inspection.HasOutput = true
+			} else if hasTextInOpenAI2Content(item["content"]) {
 				inspection.HasOutput = true
 			}
 		}
@@ -394,9 +410,14 @@ func hasValidResponsesOutputItem(item map[string]interface{}) bool {
 	switch itemType {
 	case "message":
 		return hasTextInOpenAI2Content(item["content"]) || hasValidToolCalls(item["tool_calls"])
-	case "function_call":
-		return hasValidResponsesFunctionCall(item)
+	case "function_call", "custom_tool_call", "local_shell_call", "computer_call",
+		"file_search_call", "web_search_call", "mcp_call", "code_interpreter_call",
+		"image_generation_call":
+		return hasValidResponsesToolLikeOutputItem(item)
 	default:
+		if strings.HasSuffix(itemType, "_call") {
+			return hasValidResponsesToolLikeOutputItem(item)
+		}
 		return hasTextInOpenAI2Content(item["content"])
 	}
 }
@@ -406,6 +427,22 @@ func hasValidResponsesFunctionCall(item map[string]interface{}) bool {
 		hasNonEmptyString(item["call_id"]) ||
 		hasNonEmptyString(item["id"]) ||
 		hasNonEmptyString(item["arguments"])
+}
+
+func hasValidResponsesToolLikeOutputItem(item map[string]interface{}) bool {
+	if hasValidResponsesFunctionCall(item) ||
+		hasNonEmptyString(item["status"]) ||
+		hasNonEmptyString(item["input"]) ||
+		hasNonEmptyString(item["output"]) {
+		return true
+	}
+	if action, ok := item["action"].(map[string]interface{}); ok && len(action) > 0 {
+		return true
+	}
+	if results, ok := item["results"].([]interface{}); ok && len(results) > 0 {
+		return true
+	}
+	return false
 }
 
 func hasValidClaudeContentBlock(block map[string]interface{}) bool {

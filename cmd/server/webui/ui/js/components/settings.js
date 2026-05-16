@@ -12,12 +12,20 @@ const defaultFailover = {
         networkErrorSec: 30,
         tokenUnavailableSec: 600,
         configErrorSec: 1800
+    },
+    circuitBreaker: {
+        consecutiveFailures: 3,
+        windowSec: 60,
+        failureRateThreshold: 0.60,
+        minRequests: 5,
+        cooldownSec: 600
     }
 };
 
 class Settings {
     constructor() {
         this.container = document.getElementById('view-container');
+        this.currentFailover = defaultFailover;
         window.addEventListener('languageChanged', () => {
             if (state.get('currentView') === 'settings') {
                 this.render();
@@ -74,6 +82,7 @@ class Settings {
         try {
             const config = await api.getConfig();
             const failover = this.normalizeFailover(config.failover);
+            this.currentFailover = failover;
             const form = document.getElementById('settings-form');
             form.elements.recoveredEndpointPolicy.value = failover.recoveredEndpointPolicy;
             Object.entries(failover.cooldowns).forEach(([key, value]) => {
@@ -105,7 +114,8 @@ class Settings {
                         networkErrorSec: readSeconds('networkErrorSec'),
                         tokenUnavailableSec: readSeconds('tokenUnavailableSec'),
                         configErrorSec: readSeconds('configErrorSec')
-                    }
+                    },
+                    circuitBreaker: this.currentFailover?.circuitBreaker || defaultFailover.circuitBreaker
                 }
             });
             notifications.success(t('settings.saved'));
@@ -117,6 +127,7 @@ class Settings {
 
     normalizeFailover(failover) {
         const cooldowns = failover?.cooldowns || {};
+        const circuitBreaker = failover?.circuitBreaker || {};
         return {
             recoveredEndpointPolicy: failover?.recoveredEndpointPolicy || defaultFailover.recoveredEndpointPolicy,
             cooldowns: {
@@ -126,6 +137,13 @@ class Settings {
                 networkErrorSec: Number.isFinite(Number(cooldowns.networkErrorSec)) ? Number(cooldowns.networkErrorSec) : defaultFailover.cooldowns.networkErrorSec,
                 tokenUnavailableSec: Number.isFinite(Number(cooldowns.tokenUnavailableSec)) ? Number(cooldowns.tokenUnavailableSec) : defaultFailover.cooldowns.tokenUnavailableSec,
                 configErrorSec: Number.isFinite(Number(cooldowns.configErrorSec)) ? Number(cooldowns.configErrorSec) : defaultFailover.cooldowns.configErrorSec
+            },
+            circuitBreaker: {
+                consecutiveFailures: Number.isFinite(Number(circuitBreaker.consecutiveFailures)) ? Number(circuitBreaker.consecutiveFailures) : defaultFailover.circuitBreaker.consecutiveFailures,
+                windowSec: Number.isFinite(Number(circuitBreaker.windowSec)) ? Number(circuitBreaker.windowSec) : defaultFailover.circuitBreaker.windowSec,
+                failureRateThreshold: Number.isFinite(Number(circuitBreaker.failureRateThreshold)) ? Number(circuitBreaker.failureRateThreshold) : defaultFailover.circuitBreaker.failureRateThreshold,
+                minRequests: Number.isFinite(Number(circuitBreaker.minRequests)) ? Number(circuitBreaker.minRequests) : defaultFailover.circuitBreaker.minRequests,
+                cooldownSec: Number.isFinite(Number(circuitBreaker.cooldownSec)) ? Number(circuitBreaker.cooldownSec) : defaultFailover.circuitBreaker.cooldownSec
             }
         };
     }

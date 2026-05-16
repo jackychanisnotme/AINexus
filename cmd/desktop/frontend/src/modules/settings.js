@@ -17,12 +17,20 @@ const defaultFailoverSettings = {
         networkErrorSec: 30,
         tokenUnavailableSec: 600,
         configErrorSec: 1800
+    },
+    circuitBreaker: {
+        consecutiveFailures: 3,
+        windowSec: 60,
+        failureRateThreshold: 0.60,
+        minRequests: 5,
+        cooldownSec: 600
     }
 };
 
 function normalizeFailoverSettings(config) {
     const failover = config?.failover || {};
     const cooldowns = failover.cooldowns || {};
+    const circuitBreaker = failover.circuitBreaker || {};
     return {
         recoveredEndpointPolicy: failover.recoveredEndpointPolicy || defaultFailoverSettings.recoveredEndpointPolicy,
         cooldowns: {
@@ -32,6 +40,13 @@ function normalizeFailoverSettings(config) {
             networkErrorSec: Number.isFinite(Number(cooldowns.networkErrorSec)) ? Number(cooldowns.networkErrorSec) : defaultFailoverSettings.cooldowns.networkErrorSec,
             tokenUnavailableSec: Number.isFinite(Number(cooldowns.tokenUnavailableSec)) ? Number(cooldowns.tokenUnavailableSec) : defaultFailoverSettings.cooldowns.tokenUnavailableSec,
             configErrorSec: Number.isFinite(Number(cooldowns.configErrorSec)) ? Number(cooldowns.configErrorSec) : defaultFailoverSettings.cooldowns.configErrorSec
+        },
+        circuitBreaker: {
+            consecutiveFailures: Number.isFinite(Number(circuitBreaker.consecutiveFailures)) ? Number(circuitBreaker.consecutiveFailures) : defaultFailoverSettings.circuitBreaker.consecutiveFailures,
+            windowSec: Number.isFinite(Number(circuitBreaker.windowSec)) ? Number(circuitBreaker.windowSec) : defaultFailoverSettings.circuitBreaker.windowSec,
+            failureRateThreshold: Number.isFinite(Number(circuitBreaker.failureRateThreshold)) ? Number(circuitBreaker.failureRateThreshold) : defaultFailoverSettings.circuitBreaker.failureRateThreshold,
+            minRequests: Number.isFinite(Number(circuitBreaker.minRequests)) ? Number(circuitBreaker.minRequests) : defaultFailoverSettings.circuitBreaker.minRequests,
+            cooldownSec: Number.isFinite(Number(circuitBreaker.cooldownSec)) ? Number(circuitBreaker.cooldownSec) : defaultFailoverSettings.circuitBreaker.cooldownSec
         }
     };
 }
@@ -380,6 +395,7 @@ export async function saveSettings() {
         // Get current config for comparison
         const configStr = await window.go.main.App.GetConfig();
         const config = JSON.parse(configStr);
+        failover.circuitBreaker = normalizeFailoverSettings(config).circuitBreaker;
 
         // Use batch save to avoid database lock issues
         const settings = {

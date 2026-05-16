@@ -498,28 +498,11 @@ func OpenAI2StreamToClaude(event []byte, ctx *transformer.StreamContext) ([]byte
 	}
 
 	var result []byte
-
-	switch evt.Type {
-	case "response.created":
-		if evt.Response != nil {
-			ctx.MessageID = evt.Response.ID
-			if evt.Response.Usage.InputTokens > 0 {
-				ctx.InputTokens = evt.Response.Usage.InputTokens
-			}
-			if evt.Response.Usage.OutputTokens > 0 {
-				ctx.OutputTokens = evt.Response.Usage.OutputTokens
-			}
+	appendText := func(text string) {
+		if text == "" {
+			return
 		}
-		result = append(result, buildClaudeEvent("message_start", map[string]interface{}{
-			"message": map[string]interface{}{
-				"id": ctx.MessageID, "type": "message", "role": "assistant", "content": []interface{}{},
-				"model": ctx.ModelName, "stop_reason": nil, "stop_sequence": nil,
-				"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens},
-			},
-		})...)
-
-	case "response.output_text.delta":
-		content := ctx.ThinkingBuffer + evt.Delta
+		content := ctx.ThinkingBuffer + text
 		ctx.ThinkingBuffer = ""
 
 		emitText, emitThinking := makeThinkEmitters(ctx, &result)
@@ -545,6 +528,41 @@ func OpenAI2StreamToClaude(event []byte, ctx *transformer.StreamContext) ([]byte
 		}
 
 		consumeThinkTaggedStream(content, ctx, emitTextWithClose, emitThinkingWithClose)
+	}
+	appendMissingText := func(outputIndex int, text string) {
+		appendText(missingOpenAI2Text(ctx, outputIndex, text))
+	}
+
+	switch evt.Type {
+	case "response.created":
+		if evt.Response != nil {
+			ctx.MessageID = evt.Response.ID
+			if evt.Response.Usage.InputTokens > 0 {
+				ctx.InputTokens = evt.Response.Usage.InputTokens
+			}
+			if evt.Response.Usage.OutputTokens > 0 {
+				ctx.OutputTokens = evt.Response.Usage.OutputTokens
+			}
+		}
+		result = append(result, buildClaudeEvent("message_start", map[string]interface{}{
+			"message": map[string]interface{}{
+				"id": ctx.MessageID, "type": "message", "role": "assistant", "content": []interface{}{},
+				"model": ctx.ModelName, "stop_reason": nil, "stop_sequence": nil,
+				"usage": map[string]interface{}{"input_tokens": ctx.InputTokens, "output_tokens": ctx.OutputTokens},
+			},
+		})...)
+
+	case "response.output_text.delta":
+		text := firstNonEmpty(evt.Delta, evt.Text)
+		recordOpenAI2Text(ctx, evt.OutputIndex, text)
+		appendText(text)
+
+	case "response.output_text.done", "response.content_part.done":
+		text := firstNonEmpty(evt.Text, evt.Delta)
+		if text == "" && evt.Part != nil {
+			text = evt.Part.Text
+		}
+		appendMissingText(evt.OutputIndex, text)
 
 	case "response.output_item.added":
 		if evt.Item != nil && evt.Item.Type == "function_call" {
@@ -590,11 +608,19 @@ func OpenAI2StreamToClaude(event []byte, ctx *transformer.StreamContext) ([]byte
 
 	case "response.completed":
 		if evt.Response != nil {
+			if ctx.MessageID == "" {
+				ctx.MessageID = evt.Response.ID
+			}
 			if evt.Response.Usage.InputTokens > 0 {
 				ctx.InputTokens = evt.Response.Usage.InputTokens
 			}
 			if evt.Response.Usage.OutputTokens > 0 {
 				ctx.OutputTokens = evt.Response.Usage.OutputTokens
+			}
+			for outputIndex, item := range evt.Response.Output {
+				if item.Type == "message" {
+					appendMissingText(outputIndex, openAI2TextFromParts(item.Content))
+				}
 			}
 		}
 		emitText, emitThinking := makeThinkEmitters(ctx, &result)

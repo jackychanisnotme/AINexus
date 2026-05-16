@@ -951,7 +951,20 @@ func OpenAI2StreamToOpenAI(event []byte, ctx *transformer.StreamContext, model s
 		return nil, nil
 
 	case "response.output_text.delta":
-		return buildOpenAIChunk(ctx.MessageID, model, evt.Delta, nil, "")
+		text := firstNonEmpty(evt.Delta, evt.Text)
+		recordOpenAI2Text(ctx, evt.OutputIndex, text)
+		return buildOpenAIChunk(ctx.MessageID, model, text, nil, "")
+
+	case "response.output_text.done", "response.content_part.done":
+		text := firstNonEmpty(evt.Text, evt.Delta)
+		if text == "" && evt.Part != nil {
+			text = evt.Part.Text
+		}
+		missingText := missingOpenAI2Text(ctx, evt.OutputIndex, text)
+		if missingText == "" {
+			return nil, nil
+		}
+		return buildOpenAIChunk(ctx.MessageID, model, missingText, nil, "")
 
 	case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 		return buildOpenAIReasoningChunk(ctx.MessageID, model, firstNonEmpty(evt.Delta, evt.Text))
@@ -983,6 +996,9 @@ func OpenAI2StreamToOpenAI(event []byte, ctx *transformer.StreamContext, model s
 
 	case "response.completed":
 		if evt.Response != nil {
+			if ctx.MessageID == "" {
+				ctx.MessageID = evt.Response.ID
+			}
 			if evt.Response.Usage.InputTokens > 0 {
 				ctx.InputTokens = evt.Response.Usage.InputTokens
 			}
@@ -1002,7 +1018,11 @@ func OpenAI2StreamToOpenAI(event []byte, ctx *transformer.StreamContext, model s
 		if evt.Response != nil && evt.Response.Usage.TotalTokens > 0 {
 			usage["total_tokens"] = evt.Response.Usage.TotalTokens
 		}
-		return buildOpenAIChunkWithUsage(ctx.MessageID, model, "", nil, finishReason, usage)
+		content := ""
+		if evt.Response != nil {
+			content = openAI2MissingOutputText(ctx, evt.Response.Output)
+		}
+		return buildOpenAIChunkWithUsage(ctx.MessageID, model, content, nil, finishReason, usage)
 	}
 
 	return nil, nil

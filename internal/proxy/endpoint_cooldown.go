@@ -24,6 +24,19 @@ func (p *Proxy) markEndpointCooldown(endpointName string, reason string, duratio
 	if p.endpointCooldowns == nil {
 		p.endpointCooldowns = make(map[string]endpointCooldown)
 	}
+	if existing, ok := p.endpointCooldowns[endpointName]; ok && existing.Until.After(until) {
+		remaining := existing.Until.Sub(time.Now())
+		p.cooldownMu.Unlock()
+		logger.Debug("[COOLDOWN] Keeping existing cooldown for %s remaining=%s requested=%s %s cooldown_reason=%s existing_reason=%s",
+			endpointName,
+			remaining.Round(time.Millisecond),
+			duration.Round(time.Millisecond),
+			requestLogFields(obs, endpointName, attemptNumber, 0, reason),
+			sanitizeLogField(reason),
+			sanitizeLogField(existing.Reason),
+		)
+		return
+	}
 	p.endpointCooldowns[endpointName] = endpointCooldown{Reason: sanitizeLogField(reason), Until: until}
 	p.cooldownMu.Unlock()
 
@@ -49,6 +62,16 @@ func (p *Proxy) clearEndpointCooldowns() {
 	p.cooldownMu.Lock()
 	defer p.cooldownMu.Unlock()
 	p.endpointCooldowns = make(map[string]endpointCooldown)
+}
+
+func (p *Proxy) isEndpointInActiveCooldown(endpointName string) bool {
+	if strings.TrimSpace(endpointName) == "" {
+		return false
+	}
+	p.cooldownMu.RLock()
+	defer p.cooldownMu.RUnlock()
+	cooldown, ok := p.endpointCooldowns[endpointName]
+	return ok && cooldown.Until.After(time.Now())
 }
 
 func (p *Proxy) clearEndpointCooldownsForConfigChange(oldEndpoints []config.Endpoint, newEndpoints []config.Endpoint) {

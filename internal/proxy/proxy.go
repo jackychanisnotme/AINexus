@@ -55,8 +55,10 @@ type Proxy struct {
 	retrySleep               func(time.Duration)         // injectable sleep hook for retry backoff tests
 	endpointCooldowns        map[string]endpointCooldown // temporary request-plan skips for deterministic endpoint failures
 	cooldownMu               sync.RWMutex                // protects endpointCooldowns
-	streamHeaderTimeout      time.Duration               // injectable response-header timeout for upstream streaming requests
-	streamHeartbeatInterval  time.Duration               // injectable downstream SSE heartbeat interval
+	circuitBreakerMu         sync.Mutex
+	endpointCircuitBreakers  map[string]*endpointCircuitBreakerState
+	streamHeaderTimeout      time.Duration // injectable response-header timeout for upstream streaming requests
+	streamHeartbeatInterval  time.Duration // injectable downstream SSE heartbeat interval
 }
 
 // New creates a new Proxy instance
@@ -95,6 +97,7 @@ func New(cfg *config.Config, statsStorage StatsStorage, sqliteStorage *storage.S
 		resolver:                NewEndpointResolverWithFunc(cfg.GetEndpoints),
 		retrySleep:              time.Sleep,
 		endpointCooldowns:       make(map[string]endpointCooldown),
+		endpointCircuitBreakers: make(map[string]*endpointCircuitBreakerState),
 	}
 }
 
@@ -512,11 +515,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	requestEndpoints := endpoints
 	currentEndpointName := p.GetCurrentEndpointName()
+	planCurrentEndpointName := currentEndpointName
 	if !useSpecificEndpoint {
 		requestEndpoints = p.getRequestPlanEndpoints(endpoints, obs)
+		requestEndpoints, planCurrentEndpointName = prioritizeRequestEndpointsForClientFormat(requestEndpoints, clientFormat, currentEndpointName, obs)
 	}
-	skipCurrentEndpoint := !useSpecificEndpoint && p.isEndpointDeprioritized(currentEndpointName)
-	requestPlan := newRequestEndpointPlanForCurrentWithSkip(requestEndpoints, endpoints, currentEndpointName, skipCurrentEndpoint)
+	skipCurrentEndpoint := !useSpecificEndpoint && planCurrentEndpointName == currentEndpointName && p.isEndpointDeprioritized(currentEndpointName)
+	requestPlan := newRequestEndpointPlanForCurrentWithSkip(requestEndpoints, endpoints, planCurrentEndpointName, skipCurrentEndpoint)
 	maxRetries := p.computeMaxRetries(requestEndpoints)
 	if useSpecificEndpoint {
 		maxRetries = endpointSlowFailoverAttempts
@@ -565,7 +570,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, 0, "credential_select_failed", "Failed to select token pool credential: %v", err)
 				p.recordEndpointError(endpoint.Name, "credential_select_failed")
 				p.markRequestInactive(endpoint.Name)
-				if endpointAttempts >= endpointFastFailoverAttempts {
+				if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 					advanceForFailure(endpoint, "credential_select_failed", attemptNumber, nil)
 				}
 				continue
@@ -574,7 +579,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, 0, "no_usable_token", "No usable token in token pool")
 				p.recordEndpointError(endpoint.Name, "no_usable_token")
 				p.markRequestInactive(endpoint.Name)
-				if endpointAttempts >= endpointFastFailoverAttempts {
+				if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 					advanceForFailure(endpoint, "no_usable_token", attemptNumber, nil)
 				}
 				continue
@@ -598,7 +603,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, 0, "empty_api_key", "API key mode but apiKey is empty")
 			p.recordEndpointError(endpoint.Name, "empty_api_key")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "empty_api_key", attemptNumber, nil)
 			}
 			continue
@@ -609,7 +614,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logRequestAttemptError(obs, endpoint.Name, attemptNumber, 0, "prepare_transformer_failed", "%v", err)
 			p.recordEndpointError(endpoint.Name, "prepare_transformer_failed")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "prepare_transformer_failed", attemptNumber, nil)
 			}
 			continue
@@ -622,7 +627,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logRequestAttemptError(obs, endpoint.Name, attemptNumber, 0, "transform_request_failed", "Failed to transform request: %v", err)
 			p.recordEndpointError(endpoint.Name, "transform_request_failed")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "transform_request_failed", attemptNumber, nil)
 			}
 			continue
@@ -678,7 +683,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			logRequestAttemptError(obs, endpoint.Name, attemptNumber, 0, "build_request_failed", "Failed to create request: %v", err)
 			p.recordEndpointError(endpoint.Name, "build_request_failed")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "build_request_failed", attemptNumber, nil)
 			}
 			continue
@@ -711,7 +716,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				status := p.recordEndpointFailure(endpoint.Name, retryReason)
 				p.emitEndpointRuntimeEvent(endpoint.Name, "failure", status)
 				p.markRequestInactive(endpoint.Name)
-				if endpointAttempts >= endpointFastFailoverAttempts {
+				if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 					advanceForFailure(endpoint, retryReason, attemptNumber, nil)
 				} else {
 					logRequestAttemptWarn(obs, endpoint.Name, attemptNumber, 0, retryReason, "Retryable transport error, retrying same endpoint: %v", err)
@@ -723,7 +728,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.recordEndpointError(endpoint.Name, retryReason)
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, retryReason, attemptNumber, nil)
 			}
 			continue
@@ -778,7 +783,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 					semanticErr.OutputTokens,
 					semanticErr.OutputTextLen,
 				)
-				semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts
+				semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name)
 				p.recordSemanticEmptyResponseFailure(endpoint.Name, credentialID, semanticErr, semanticEmptyExhausted)
 				p.markRequestInactive(endpoint.Name)
 				if semanticEmptyExhausted {
@@ -796,7 +801,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.recordEndpointError(endpoint.Name, "aggregate_streaming_failed")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "aggregate_streaming_failed", attemptNumber, nil)
 			}
 			continue
@@ -837,7 +842,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 						streamResult.WroteData,
 						streamResult.WroteSemanticData,
 					)
-					semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts
+					semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name)
 					p.recordSemanticEmptyResponseFailure(endpoint.Name, credentialID, semanticErr, semanticEmptyExhausted)
 					p.markRequestInactive(endpoint.Name)
 					if streamResult.WroteSemanticData {
@@ -870,7 +875,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 					p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 					p.recordEndpointError(endpoint.Name, retryReason)
 					p.markRequestInactive(endpoint.Name)
-					if endpointAttempts >= endpointFastFailoverAttempts {
+					if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 						p.markEndpointCooldownForReason(endpoint.Name, retryReason, resp.Header, obs, attemptNumber)
 						if useSpecificEndpoint {
 							if streamSession != nil && streamSession.Started() {
@@ -942,7 +947,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 					semanticErr.OutputTokens,
 					semanticErr.OutputTextLen,
 				)
-				semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts
+				semanticEmptyExhausted := endpointAttempts >= endpointSlowFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name)
 				p.recordSemanticEmptyResponseFailure(endpoint.Name, credentialID, semanticErr, semanticEmptyExhausted)
 				p.markRequestInactive(endpoint.Name)
 				if semanticEmptyExhausted {
@@ -955,7 +960,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.recordEndpointError(endpoint.Name, "non_stream_response_failed")
 			p.markRequestInactive(endpoint.Name)
-			if endpointAttempts >= endpointFastFailoverAttempts {
+			if endpointAttempts >= endpointFastFailoverAttempts || p.isEndpointInActiveCooldown(endpoint.Name) {
 				advanceForFailure(endpoint, "non_stream_response_failed", attemptNumber, nil)
 			}
 			continue
@@ -1040,7 +1045,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			p.recordCredentialUsage(credentialID, endpoint.Name, 0, 1, 0, 0)
 			p.recordEndpointError(endpoint.Name, retryReason, resp.StatusCode)
 			p.markRequestInactive(endpoint.Name)
-			shouldFailover := shouldRotateEndpointAfterHTTPFailure(endpointAttempts, resp.StatusCode, errMsg)
+			shouldFailover := shouldRotateEndpointAfterHTTPFailure(endpointAttempts, resp.StatusCode, errMsg) || p.isEndpointInActiveCooldown(endpoint.Name)
 			if retryReason == "rate_limited" && !shouldFailover {
 				backoff := rateLimitBackoffDuration(endpointAttempts, resp.Header)
 				logger.Debug("[%s] Backing off before retry: %s %s retry_reason=%s", endpoint.Name, backoff, requestLogFields(obs, endpoint.Name, attemptNumber, resp.StatusCode, retryReason), retryReason)

@@ -110,6 +110,7 @@ func (p *Proxy) recordEndpointFailure(endpointName, reason string, statusCodes .
 			UpdatedAt:             now,
 		}
 	}
+	p.recordEndpointCircuitFailure(endpointName, cleanReason, statusCode)
 	return status
 }
 
@@ -120,6 +121,7 @@ func (p *Proxy) recordEndpointError(endpointName, reason string, statusCodes ...
 }
 
 func (p *Proxy) recordEndpointSuccessEvent(endpointName string) {
+	p.recordEndpointCircuitSuccess(endpointName)
 	status := p.recordEndpointSuccess(endpointName)
 	p.emitEndpointRuntimeEvent(endpointName, "success", status)
 	if p.onEndpointSuccess != nil {

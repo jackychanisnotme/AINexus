@@ -85,6 +85,215 @@ func TestHTTPFailureFallbackIsRequestLocalAndDoesNotSwitchGlobalEndpoint(t *test
 	}
 }
 
+func TestResponsesRequestPrefersOpenAI2OverCurrentClaudeEndpoint(t *testing.T) {
+	logger.GetLogger().Clear()
+	logger.GetLogger().SetMinLevel(logger.DEBUG)
+
+	var claudeHits int
+	claudeEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claudeHits++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"claude unavailable"}}`))
+	}))
+	defer claudeEndpoint.Close()
+
+	var gptHits int
+	gptEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gptHits++
+		if r.URL.Path != "/v1/responses" {
+			t.Errorf("expected GPT endpoint to receive /v1/responses, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-gpt","usage":{"input_tokens":1,"output_tokens":2},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer gptEndpoint.Close()
+
+	currentClaude := failoverPolicyTestEndpoint("Current Claude", claudeEndpoint.URL)
+	currentClaude.Transformer = "claude"
+	currentClaude.Model = "claude-opus-4-7"
+	nativeGPT := failoverPolicyTestEndpoint("Native GPT", gptEndpoint.URL)
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		currentClaude,
+		nativeGPT,
+	}, claudeEndpoint.Client())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerCCNexusRequestID, "req-prefer-native-responses")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected response request to use native GPT endpoint, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if claudeHits != 0 {
+		t.Fatalf("expected current Claude endpoint to be deprioritized, hits=%d", claudeHits)
+	}
+	if gptHits != 1 {
+		t.Fatalf("expected native GPT endpoint to be hit once, got %d", gptHits)
+	}
+	if got := rec.Header().Get(headerCCNexusEndpoint); got != "Native GPT" {
+		t.Fatalf("expected response endpoint Native GPT, got %q", got)
+	}
+	logs := joinedProxyLogs()
+	if !strings.Contains(logs, "[FORMAT_PREF] demoting Claude endpoint Current Claude for /v1/responses") ||
+		!strings.Contains(logs, "retry_reason=format_preference") {
+		t.Fatalf("expected format preference log, got logs:\n%s", joinedProxyLogs())
+	}
+}
+
+func TestResponsesRequestUsesClaudeEndpointWhenNoNativeResponsesEndpoint(t *testing.T) {
+	var claudeHits int
+	claudeEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claudeHits++
+		if r.URL.Path != "/v1/messages" {
+			t.Errorf("expected Claude endpoint to receive /v1/messages, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg-claude","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-opus-4-7","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`))
+	}))
+	defer claudeEndpoint.Close()
+
+	onlyClaude := failoverPolicyTestEndpoint("Only Claude", claudeEndpoint.URL)
+	onlyClaude.Transformer = "claude"
+	onlyClaude.Model = "claude-opus-4-7"
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{onlyClaude}, claudeEndpoint.Client())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerCCNexusRequestID, "req-only-claude")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected single Claude endpoint to remain usable, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if claudeHits != 1 {
+		t.Fatalf("expected Claude endpoint to be hit once, got %d", claudeHits)
+	}
+	if got := rec.Header().Get(headerCCNexusEndpoint); got != "Only Claude" {
+		t.Fatalf("expected response endpoint Only Claude, got %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"object":"response"`) {
+		t.Fatalf("expected Claude response to be converted to Responses shape, got %q", rec.Body.String())
+	}
+}
+
+func TestCircuitBreakerConsecutiveFailuresLongCooldownAndFastFallback(t *testing.T) {
+	logger.GetLogger().Clear()
+	logger.GetLogger().SetMinLevel(logger.DEBUG)
+
+	var primaryHits int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream unavailable"}}`))
+	}))
+	defer primary.Close()
+
+	var fallbackHits int
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-fallback","usage":{"input_tokens":1,"output_tokens":2},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer fallback.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", primary.URL),
+		failoverPolicyTestEndpoint("Fallback", fallback.URL),
+	}, primary.Client())
+	p.config.UpdateFailover(&config.FailoverConfig{
+		RecoveredEndpointPolicy: config.RecoveredEndpointPolicyAutoReturn,
+		Cooldowns:               config.DefaultFailoverConfig().Cooldowns,
+		CircuitBreaker: &config.FailoverCircuitBreakerConfig{
+			ConsecutiveFailures:  1,
+			WindowSec:            60,
+			FailureRateThreshold: 0.90,
+			MinRequests:          10,
+			CooldownSec:          600,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerCCNexusRequestID, "req-circuit-consecutive")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected fallback success after circuit breaker, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if primaryHits != 1 {
+		t.Fatalf("expected circuit breaker to stop retrying Primary after one failure, got %d hits", primaryHits)
+	}
+	if fallbackHits != 1 {
+		t.Fatalf("expected Fallback to be hit once, got %d", fallbackHits)
+	}
+
+	p.cooldownMu.RLock()
+	cooldown, cooled := p.endpointCooldowns["Primary"]
+	p.cooldownMu.RUnlock()
+	if !cooled || cooldown.Reason != retryReasonCircuitBreakerConsecutive {
+		t.Fatalf("expected Primary long cooldown from circuit breaker, got cooled=%v cooldown=%#v", cooled, cooldown)
+	}
+	if remaining := time.Until(cooldown.Until); remaining < 9*time.Minute {
+		t.Fatalf("expected long cooldown near 10m, got remaining=%s", remaining)
+	}
+
+	logs := joinedProxyLogs()
+	if !strings.Contains(logs, "[CIRCUIT_BREAKER]") ||
+		!strings.Contains(logs, "trigger=circuit_breaker_consecutive_failures") ||
+		!strings.Contains(logs, "Keeping existing cooldown") {
+		t.Fatalf("expected circuit breaker and long-cooldown preservation logs, got:\n%s", logs)
+	}
+}
+
+func TestCircuitBreakerFailureRateTriggersLongCooldown(t *testing.T) {
+	logger.GetLogger().Clear()
+	logger.GetLogger().SetMinLevel(logger.DEBUG)
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", "https://primary.example"),
+	}, nil)
+	p.config.UpdateFailover(&config.FailoverConfig{
+		RecoveredEndpointPolicy: config.RecoveredEndpointPolicyAutoReturn,
+		Cooldowns:               config.DefaultFailoverConfig().Cooldowns,
+		CircuitBreaker: &config.FailoverCircuitBreakerConfig{
+			ConsecutiveFailures:  0,
+			WindowSec:            60,
+			FailureRateThreshold: 0.50,
+			MinRequests:          4,
+			CooldownSec:          600,
+		},
+	})
+
+	p.recordEndpointSuccessEvent("Primary")
+	p.recordEndpointError("Primary", "upstream_5xx", http.StatusServiceUnavailable)
+	p.recordEndpointSuccessEvent("Primary")
+	if p.isEndpointInActiveCooldown("Primary") {
+		t.Fatal("did not expect cooldown before reaching minimum window request count")
+	}
+
+	p.recordEndpointError("Primary", "upstream_5xx", http.StatusServiceUnavailable)
+
+	p.cooldownMu.RLock()
+	cooldown, cooled := p.endpointCooldowns["Primary"]
+	p.cooldownMu.RUnlock()
+	if !cooled || cooldown.Reason != retryReasonCircuitBreakerFailureRate {
+		t.Fatalf("expected failure-rate circuit cooldown, got cooled=%v cooldown=%#v", cooled, cooldown)
+	}
+	if !strings.Contains(joinedProxyLogs(), "trigger=circuit_breaker_failure_rate") {
+		t.Fatalf("expected failure-rate circuit log, got logs:\n%s", joinedProxyLogs())
+	}
+}
+
 func hasRuntimeFailureEvent(events []EndpointRuntimeEvent, endpointName, reason string, statusCode int) bool {
 	for _, event := range events {
 		if event.Event == "failure" &&
@@ -1209,6 +1418,7 @@ func disableEndpointCooldownsForTest(p *Proxy) {
 	p.config.UpdateFailover(&config.FailoverConfig{
 		RecoveredEndpointPolicy: config.RecoveredEndpointPolicyDeprioritize,
 		Cooldowns:               &config.FailoverCooldownConfig{},
+		CircuitBreaker:          &config.FailoverCircuitBreakerConfig{},
 	})
 }
 

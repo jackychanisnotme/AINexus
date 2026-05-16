@@ -179,6 +179,45 @@ func openAI2Text(ctx *transformer.StreamContext, outputIndex int) string {
 	return ctx.ResponseTextByIndex[outputIndex]
 }
 
+func openAI2TextFromParts(parts []transformer.OpenAI2ContentPart) string {
+	var text strings.Builder
+	for _, part := range parts {
+		if part.Type == "output_text" && part.Text != "" {
+			text.WriteString(part.Text)
+		}
+	}
+	return text.String()
+}
+
+func missingOpenAI2Text(ctx *transformer.StreamContext, outputIndex int, fullText string) string {
+	if fullText == "" {
+		return ""
+	}
+	current := openAI2Text(ctx, outputIndex)
+	if current == fullText {
+		return ""
+	}
+	if current != "" {
+		if !strings.HasPrefix(fullText, current) {
+			return ""
+		}
+		fullText = strings.TrimPrefix(fullText, current)
+	}
+	recordOpenAI2Text(ctx, outputIndex, fullText)
+	return fullText
+}
+
+func openAI2MissingOutputText(ctx *transformer.StreamContext, output []transformer.OpenAI2OutputItem) string {
+	var text strings.Builder
+	for outputIndex, item := range output {
+		if item.Type != "message" {
+			continue
+		}
+		text.WriteString(missingOpenAI2Text(ctx, outputIndex, openAI2TextFromParts(item.Content)))
+	}
+	return text.String()
+}
+
 func recordOpenAI2Text(ctx *transformer.StreamContext, outputIndex int, delta string) {
 	ensureOpenAI2StreamState(ctx)
 	if ctx == nil || delta == "" {

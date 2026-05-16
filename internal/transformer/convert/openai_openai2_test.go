@@ -334,6 +334,33 @@ func TestOpenAI2StreamToOpenAIIncludesUsageOnCompleted(t *testing.T) {
 	}
 }
 
+func TestOpenAI2StreamToOpenAIEmitsCompletedOnlyOutput(t *testing.T) {
+	ctx := transformer.NewStreamContext()
+
+	completed := `data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"late answer"}]}]}}`
+	out, err := OpenAI2StreamToOpenAI([]byte(completed), ctx, "gpt-4.1")
+	if err != nil {
+		t.Fatalf("response.completed failed: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected transformed chunk, got nil")
+	}
+
+	_, jsonData := parseSSE(out)
+	var chunk map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonData), &chunk); err != nil {
+		t.Fatalf("unmarshal chunk failed: %v, raw=%s", err, jsonData)
+	}
+	choice := chunk["choices"].([]interface{})[0].(map[string]interface{})
+	delta := choice["delta"].(map[string]interface{})
+	if delta["content"] != "late answer" {
+		t.Fatalf("expected completed-only text in final delta, got %#v", delta)
+	}
+	if choice["finish_reason"] != "stop" {
+		t.Fatalf("expected finish_reason stop, got %#v", choice["finish_reason"])
+	}
+}
+
 func TestOpenAIStreamToOpenAI2PreservesReasoningDelta(t *testing.T) {
 	ctx := transformer.NewStreamContext()
 
