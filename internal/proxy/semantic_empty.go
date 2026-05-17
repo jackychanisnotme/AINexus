@@ -42,6 +42,10 @@ func newSemanticEmptyResponseError(kind string, outputTokens, outputTextLen int)
 	}
 }
 
+func hasSuccessfulOutputTokens(outputTokens int) bool {
+	return outputTokens > 0
+}
+
 func asSemanticEmptyResponseError(err error) (*semanticEmptyResponseError, bool) {
 	var target *semanticEmptyResponseError
 	if errors.As(err, &target) && target != nil {
@@ -88,6 +92,9 @@ func inspectSemanticResponse(body []byte) semanticResponseInspection {
 }
 
 func semanticEmptyErrorForResponse(body []byte, outputTokens int) *semanticEmptyResponseError {
+	if hasSuccessfulOutputTokens(outputTokens) {
+		return nil
+	}
 	inspection := inspectSemanticResponse(body)
 	if !inspection.Recognized || inspection.HasOutput {
 		return nil

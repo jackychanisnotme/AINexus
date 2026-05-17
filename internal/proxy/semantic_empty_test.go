@@ -9,16 +9,46 @@ import (
 	"time"
 
 	"github.com/lich0821/ccNexus/internal/config"
+	"github.com/lich0821/ccNexus/internal/logger"
 	"github.com/lich0821/ccNexus/internal/storage"
 )
 
-func TestSemanticEmptyResponsesNonStreamingRetriesBeforeWriting(t *testing.T) {
+func TestSemanticEmptyResponsesNonStreamingPositiveOutputTokensDoesNotRetry(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18},"output":[]}`))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":false,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected positive-token empty response to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected positive-token empty response not to retry, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), "resp-empty") {
+		t.Fatalf("expected original positive-token empty response to reach client, got %q", rec.Body.String())
+	}
+}
+
+func TestSemanticEmptyResponsesNonStreamingZeroOutputTokensRetriesBeforeWriting(t *testing.T) {
 	var hits int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		w.Header().Set("Content-Type", "application/json")
 		if hits == 1 {
-			_, _ = w.Write([]byte(`{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18},"output":[]}`))
+			_, _ = w.Write([]byte(`{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":0,"total_tokens":11},"output":[]}`))
 			return
 		}
 		_, _ = w.Write([]byte(validResponsesBody("resp-ok", "ok")))
@@ -38,23 +68,19 @@ func TestSemanticEmptyResponsesNonStreamingRetriesBeforeWriting(t *testing.T) {
 		t.Fatalf("expected retry to return final success, got status=%d body=%q", rec.Code, rec.Body.String())
 	}
 	if hits != 2 {
-		t.Fatalf("expected empty response to be retried once, got hits=%d", hits)
+		t.Fatalf("expected zero-token empty response to be retried once, got hits=%d", hits)
 	}
 	if strings.Contains(rec.Body.String(), "resp-empty") || !strings.Contains(rec.Body.String(), "resp-ok") {
 		t.Fatalf("expected only final non-empty response to reach client, got %q", rec.Body.String())
 	}
 }
 
-func TestSemanticEmptyReasoningOnlyResponsesRetry(t *testing.T) {
+func TestSemanticEmptyReasoningOnlyPositiveOutputTokensDoesNotRetry(t *testing.T) {
 	var hits int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		w.Header().Set("Content-Type", "application/json")
-		if hits == 1 {
-			_, _ = w.Write([]byte(`{"id":"resp-reasoning","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18},"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(validResponsesBody("resp-ok", "ok")))
+		_, _ = w.Write([]byte(`{"id":"resp-reasoning","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18},"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}]}`))
 	}))
 	defer upstream.Close()
 
@@ -68,10 +94,10 @@ func TestSemanticEmptyReasoningOnlyResponsesRetry(t *testing.T) {
 	p.handleProxy(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected retry to return final success, got status=%d body=%q", rec.Code, rec.Body.String())
+		t.Fatalf("expected positive-token reasoning-only response to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
 	}
-	if hits != 2 {
-		t.Fatalf("expected reasoning-only response to be retried once, got hits=%d", hits)
+	if hits != 1 {
+		t.Fatalf("expected positive-token reasoning-only response not to retry, got hits=%d", hits)
 	}
 }
 
@@ -127,16 +153,12 @@ func TestResponsesToolLikeOutputOnlyIsNotSemanticEmpty(t *testing.T) {
 	}
 }
 
-func TestOpenAIChatEmptyMessageRetriesAndToolCallsAreValid(t *testing.T) {
+func TestOpenAIChatPositiveOutputTokensAndToolCallsAreValid(t *testing.T) {
 	var emptyHits int
 	emptyThenOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		emptyHits++
 		w.Header().Set("Content-Type", "application/json")
-		if emptyHits == 1 {
-			_, _ = w.Write([]byte(`{"id":"chat-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"id":"chat-ok","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"id":"chat-empty","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`))
 	}))
 	defer emptyThenOK.Close()
 
@@ -150,10 +172,13 @@ func TestOpenAIChatEmptyMessageRetriesAndToolCallsAreValid(t *testing.T) {
 	p.handleProxy(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected empty chat message retry to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+		t.Fatalf("expected positive-token empty chat message to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
 	}
-	if emptyHits != 2 {
-		t.Fatalf("expected empty chat message to be retried once, got hits=%d", emptyHits)
+	if emptyHits != 1 {
+		t.Fatalf("expected positive-token empty chat message not to retry, got hits=%d", emptyHits)
+	}
+	if !strings.Contains(rec.Body.String(), "chat-empty") {
+		t.Fatalf("expected original positive-token empty chat response to reach client, got %q", rec.Body.String())
 	}
 
 	var toolHits int
@@ -181,6 +206,35 @@ func TestOpenAIChatEmptyMessageRetriesAndToolCallsAreValid(t *testing.T) {
 	}
 }
 
+func TestClaudeEmptyMessagePositiveOutputTokensDoesNotRetry(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg-empty","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	endpoint := failoverPolicyTestEndpoint("Primary", upstream.URL)
+	endpoint.Transformer = "claude"
+	p := newFailoverPolicyTestProxy([]config.Endpoint{endpoint}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-test","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected positive-token empty Claude message to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected positive-token empty Claude message not to retry, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), "msg-empty") {
+		t.Fatalf("expected original positive-token empty Claude response to reach client, got %q", rec.Body.String())
+	}
+}
+
 func TestForceStreamAggregationSemanticEmptyRetriesBeforeWriting(t *testing.T) {
 	var hits int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +242,7 @@ func TestForceStreamAggregationSemanticEmptyRetriesBeforeWriting(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if hits == 1 {
 			_, _ = w.Write([]byte(strings.Join([]string{
-				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[]}}`,
+				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2},"output":[]}}`,
 				"",
 				"data: [DONE]",
 				"",
@@ -233,7 +287,7 @@ func TestStreamingSemanticEmptyRetriesAfterDownstreamHeartbeat(t *testing.T) {
 			_, _ = w.Write([]byte(strings.Join([]string{
 				`data: {"type":"response.created","response":{"id":"resp-empty","object":"response","status":"in_progress"}}`,
 				"",
-				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5},"output":[]}}`,
+				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2},"output":[]}}`,
 				"",
 				"data: [DONE]",
 				"",
@@ -272,6 +326,105 @@ func TestStreamingSemanticEmptyRetriesAfterDownstreamHeartbeat(t *testing.T) {
 	}
 	if strings.Contains(body, "resp-empty") {
 		t.Fatalf("did not expect first empty stream events to be forwarded, got %q", body)
+	}
+}
+
+func TestStreamingPositiveOutputTokenResponsesEmptyCompletesWithoutRetry(t *testing.T) {
+	logger.GetLogger().Clear()
+	logger.GetLogger().SetMinLevel(logger.DEBUG)
+
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if hits == 1 {
+			_, _ = w.Write([]byte(strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp-empty","object":"response","status":"in_progress"}}`,
+				"",
+				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":386,"total_tokens":388},"output":[]}}`,
+				"",
+				"data: [DONE]",
+				"",
+			}, "\n")))
+			return
+		}
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"unexpected retry"}`,
+			"",
+			`data: {"type":"response.completed","response":{"id":"resp-retry","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"unexpected retry"}]}]}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected positive-token empty stream to complete, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("expected no semantic-empty retry for positive-token empty stream, got hits=%d", hits)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "resp-empty") || !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("expected original terminal empty stream to reach client, got %q", body)
+	}
+	if strings.Contains(joinedProxyLogs(), retryReasonSemanticEmptyResponse) {
+		t.Fatalf("did not expect semantic-empty retry log, got logs:\n%s", joinedProxyLogs())
+	}
+}
+
+func TestStreamingZeroTokenResponsesEmptyStillRetries(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if hits == 1 {
+			_, _ = w.Write([]byte(strings.Join([]string{
+				`data: {"type":"response.completed","response":{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":0,"total_tokens":2},"output":[]}}`,
+				"",
+				"data: [DONE]",
+				"",
+			}, "\n")))
+			return
+		}
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"ok"}`,
+			"",
+			`data: {"type":"response.completed","response":{"id":"resp-ok","object":"response","status":"completed","usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	p := newFailoverPolicyTestProxy([]config.Endpoint{
+		failoverPolicyTestEndpoint("Primary", upstream.URL),
+	}, upstream.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true,"input":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	p.handleProxy(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected zero-token empty stream retry to succeed, got status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if hits != 2 {
+		t.Fatalf("expected zero-token empty stream to be retried, got hits=%d", hits)
+	}
+	if !strings.Contains(rec.Body.String(), `"delta":"ok"`) {
+		t.Fatalf("expected fallback stream output, got %q", rec.Body.String())
 	}
 }
 
@@ -377,7 +530,7 @@ func TestTokenPoolSemanticEmptySoftCoolsCredentialAndRetriesNextToken(t *testing
 		tokens = append(tokens, token)
 		w.Header().Set("Content-Type", "application/json")
 		if token == "token-a" {
-			_, _ = w.Write([]byte(`{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18},"output":[]}`))
+			_, _ = w.Write([]byte(`{"id":"resp-empty","object":"response","status":"completed","usage":{"input_tokens":11,"output_tokens":0,"total_tokens":11},"output":[]}`))
 			return
 		}
 		_, _ = w.Write([]byte(validResponsesBody("resp-ok", "ok")))

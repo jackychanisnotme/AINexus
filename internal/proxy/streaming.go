@@ -468,6 +468,25 @@ func (p *Proxy) handleStreamingResponse(ctx context.Context, w http.ResponseWrit
 	result.OutputTokens = outputTokens
 	result.OutputText = outputText.String()
 	if result.Err == nil && result.Completed && !result.WroteSemanticData {
+		if hasSuccessfulOutputTokens(outputTokens) {
+			if pendingWrites.Len() > 0 {
+				if writeErr := writeData(pendingWrites.Bytes()); writeErr != nil {
+					result.Reason = streamFinishDownstreamWriteFailed
+					result.Completed = false
+					result.Err = writeErr
+					return result
+				}
+				pendingWrites.Reset()
+				result.WroteData = true
+			}
+			logger.Debug(
+				"[%s] Completed output-token-backed stream without semantic retry output_tokens=%d outputTextLen=%d",
+				endpoint.Name,
+				outputTokens,
+				outputText.Len(),
+			)
+			return result
+		}
 		result.Reason = retryReasonSemanticEmptyResponse
 		result.Completed = false
 		result.Err = newSemanticEmptyResponseError(emptyKind, outputTokens, outputText.Len())
