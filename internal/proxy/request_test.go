@@ -543,3 +543,29 @@ func (b *contextAwareDelayedBody) Read(p []byte) (int, error) {
 func (b *contextAwareDelayedBody) Close() error {
 	return nil
 }
+
+func TestBuildProxyRequestForcesClaudeUserAgent(t *testing.T) {
+	endpoint := config.Endpoint{
+		Name:        "ClaudeEndpoint",
+		APIUrl:      "https://claude.example.com",
+		AuthMode:    config.AuthModeAPIKey,
+		Transformer: "claude",
+	}
+	body := []byte(`{"model":"claude-opus-4-8","stream":true}`)
+
+	for _, name := range []string{"cc_claude", "cx_chat_claude", "cx_resp_claude"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
+		req.Header.Set("User-Agent", "OpenAI/Python_2.31.0")
+
+		proxyReq, err := buildProxyRequest(req, endpoint, "test-key", body, name, nil)
+		if err != nil {
+			t.Fatalf("%s: buildProxyRequest failed: %v", name, err)
+		}
+		if got := proxyReq.Header.Get("User-Agent"); got != claudeUpstreamUserAgent {
+			t.Fatalf("%s: expected User-Agent %q, got %q", name, claudeUpstreamUserAgent, got)
+		}
+		if got := proxyReq.Header.Get("anthropic-version"); got != "2023-06-01" {
+			t.Fatalf("%s: expected anthropic-version set, got %q", name, got)
+		}
+	}
+}

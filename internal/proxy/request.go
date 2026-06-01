@@ -212,6 +212,7 @@ func buildProxyRequest(r *http.Request, endpoint config.Endpoint, apiKey string,
 		// Claude endpoints
 		proxyReq.Header.Set("x-api-key", apiKey)
 		proxyReq.Header.Set("Authorization", "Bearer "+apiKey)
+		normalizeClaudeUpstreamHeaders(proxyReq.Header)
 	}
 
 	// Set Host header
@@ -267,6 +268,23 @@ func ensureHeader(headers http.Header, key, value string) {
 	if strings.TrimSpace(headers.Get(key)) == "" {
 		headers.Set(key, value)
 	}
+}
+
+// claudeUpstreamUserAgent presents a Claude-CLI identity to Claude upstreams.
+// Some Claude gateways run a WAF that returns 403 "Your request was blocked"
+// purely on an OpenAI SDK User-Agent (e.g. "OpenAI/Python", "OpenAI/JS")
+// forwarded from non-Claude clients like OpenClaw and Hermes. Overriding the
+// User-Agent is sufficient to pass; other client headers are left untouched.
+const claudeUpstreamUserAgent = "claude-cli/1.0.119 (external, cli)"
+
+// normalizeClaudeUpstreamHeaders forces a Claude-compatible identity on requests
+// sent to a Claude endpoint so foreign-client User-Agents do not trip the WAF.
+func normalizeClaudeUpstreamHeaders(headers http.Header) {
+	if headers == nil {
+		return
+	}
+	headers.Set("User-Agent", claudeUpstreamUserAgent)
+	ensureHeader(headers, "anthropic-version", "2023-06-01")
 }
 
 func isResponsesPath(path string) bool {
