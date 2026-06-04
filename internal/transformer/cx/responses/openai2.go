@@ -28,5 +28,8 @@ func (t *OpenAI2Transformer) TransformResponse(resp []byte, isStreaming bool) ([
 }
 
 func (t *OpenAI2Transformer) TransformResponseWithContext(resp []byte, isStreaming bool, ctx *transformer.StreamContext) ([]byte, error) {
-	return resp, nil
+	if !isStreaming {
+		return resp, nil
+	}
+	return convert.FilterNonResponsesStreamEvent(resp), nil
 }

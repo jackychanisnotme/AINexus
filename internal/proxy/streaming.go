@@ -169,11 +169,19 @@ func (s *downstreamStreamSession) heartbeatLoop() {
 
 // writeHeartbeat emits a protocol-valid keep-alive for the client format. Claude
 // SSE clients (e.g. Codex Desktop on /v1/messages) do not treat a bare SSE
-// comment as progress, so send an Anthropic ping event instead; OpenAI-format
-// clients accept the comment keep-alive.
+// comment as progress, so send an Anthropic ping event instead; OpenAI
+// Responses API clients (e.g. Hermes / Python SDK) require the first event to
+// be response.created or the SDK raises RuntimeError and cancels; other
+// OpenAI-format clients accept the comment keep-alive.
 func (s *downstreamStreamSession) writeHeartbeat() error {
 	if s != nil && s.clientFormat == ClientFormatClaude {
 		return s.Write([]byte("event: ping\ndata: {\"type\": \"ping\"}\n\n"))
+	}
+	if s != nil && s.clientFormat == ClientFormatOpenAIResponses {
+		// Python SDK openai>=1.0 ResponseStreamState._create_initial_response() raises
+		// RuntimeError unless the very first parsed event has type=="response.created".
+		// A minimal but schema-valid response object is enough to satisfy the parser.
+		return s.Write([]byte("data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_ccnexus_waiting\",\"object\":\"response\",\"status\":\"in_progress\",\"created_at\":0,\"model\":\"\",\"output\":[],\"parallel_tool_calls\":false}}\n\n"))
 	}
 	return s.writeComment("ccnexus waiting for upstream")
 }
