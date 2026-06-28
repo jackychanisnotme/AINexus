@@ -146,4 +146,4 @@ Server mode supports `AINEXUS_PORT`, `AINEXUS_LOG_LEVEL`, `AINEXUS_DB_PATH`, `AI
 
 ## License
 
-This project uses the [ccNexus Source-Available License](../LICENSE). The source code and compiled binaries may be viewed, downloaded, copied, run, and modified for non-commercial personal, educational, research, and evaluation purposes. Commercial use requires prior written authorization from the repository owner.
+This project uses the [AINexus Source-Available License](../LICENSE). The source code and compiled binaries may be viewed, downloaded, copied, run, and modified for non-commercial personal, educational, research, and evaluation purposes. Commercial use requires prior written authorization from the repository owner.

@@ -146,4 +146,4 @@ wire_api = "responses"  # 或 "chat"
 
 ## 许可证
 
-本项目使用 [ccNexus Source-Available License](LICENSE)。非商业个人、教育、研究和评估用途可查看、下载、复制、运行和修改源码及编译产物；商业使用需获得仓库所有者的事先书面授权。
+本项目使用 [AINexus Source-Available License](LICENSE)。非商业个人、教育、研究和评估用途可查看、下载、复制、运行和修改源码及编译产物；商业使用需获得仓库所有者的事先书面授权。
