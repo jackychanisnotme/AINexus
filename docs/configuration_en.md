@@ -13,13 +13,21 @@
 
 ## Endpoint Configuration
 
+### Auth Modes
+
+| Auth Mode | Description |
+|-----------|-------------|
+| `api_key` | Use a regular API key for upstream requests |
+| `token_pool` | Use a generic Token Pool for OpenAI-compatible services that need credential rotation |
+| `codex_token_pool` | Use Codex Token Pool with ChatGPT Codex backend defaults, credential rotation, refresh, and invalid-token isolation |
+
 ### Transformer Types
 
 | Transformer | Description |
 |--------|------|
-| `claude` | Claude API |
-| `openai` | OpenAI Chat API |
-| `openai2` | OpenAI Response API |
+| `claude` | Claude / Anthropic-compatible API |
+| `openai` | OpenAI Chat Completions-compatible API |
+| `openai2` | OpenAI Responses API, recommended for Codex CLI |
 | `gemini` | Google Gemini API |
 | `deepseek` | DeepSeek OpenAI Chat compatible API |
 | `kimi` | Kimi/Moonshot OpenAI Chat compatible API |
@@ -41,11 +49,34 @@
 ```json
 {
   "name": "OpenAI Proxy",
-  "apiUrl": "https://api.openai.com",
+  "apiUrl": "https://api.openai.com/v1",
   "apiKey": "sk-xxx",
   "enabled": true,
   "transformer": "openai",
   "model": "gpt-4-turbo"
+}
+```
+
+**Codex CLI / OpenAI Responses Endpoint:**
+```json
+{
+  "name": "OpenAI Responses",
+  "apiUrl": "https://api.openai.com/v1",
+  "apiKey": "sk-xxx",
+  "enabled": true,
+  "transformer": "openai2",
+  "model": "gpt-5-codex"
+}
+```
+
+**Codex Token Pool Endpoint:**
+```json
+{
+  "name": "Codex Token Pool",
+  "authMode": "codex_token_pool",
+  "enabled": true,
+  "transformer": "openai2",
+  "model": "gpt-5-codex"
 }
 ```
 
@@ -87,7 +118,7 @@
 
 ## WebDAV Cloud Sync
 
-Supports syncing configuration and statistics via WebDAV protocol, compatible with Nutstore, NextCloud, ownCloud, etc.
+Supports syncing configuration and statistics via WebDAV protocol, compatible with Nutstore, NextCloud, ownCloud, etc. AINexus also supports local backups and S3-compatible storage for moving configuration between devices.
 
 **Setup Steps:**
 1. Click "WebDAV Cloud Backup" in the interface
@@ -97,4 +128,5 @@ Supports syncing configuration and statistics via WebDAV protocol, compatible wi
 
 ## Data Storage Location
 
-- Database: `~/.ccNexus/ccnexus.db`
+- Desktop database: `~/.AINexus/ainexus.db`
+- Server mode can override the data directory or database path with `AINEXUS_DATA_DIR` or `AINEXUS_DB_PATH`

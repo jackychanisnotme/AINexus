@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - Node.js 18+
 - Wails CLI v2
 
@@ -18,40 +18,50 @@ wails doctor
 
 ```bash
 # Install frontend dependencies
-cd frontend && npm install && cd ..
+cd cmd/desktop/frontend && npm install
 
 # Start development mode (with hot reload)
+cd ..
 wails dev
 ```
 
 ## Build for Release
 
 ```bash
-npm run build           # Current platform
-npm run build:prod      # Production optimized
-npm run build:windows   # Windows
-npm run build:macos     # macOS
-npm run build:linux     # Linux
+# Generate desktop frontend dist after frontend changes
+cd cmd/desktop/frontend && npm run build
+
+# Build desktop app
+cd ..
+wails build -platform darwin/universal
+wails build -platform windows/amd64
+
+# Build server mode
+cd ../../cmd/server && go build -ldflags="-s -w" -o ainexus-server .
 ```
 
-Build output is in `build/bin/` directory.
+Desktop build output is in `cmd/desktop/build/bin/`.
 
 ## Project Structure
 
 ```
-ccNexus/
-├── main.go                 # Application entry
-├── app.go                  # Core application logic
+AINexus/
+├── cmd/
+│   ├── desktop/            # Wails desktop app
+│   │   ├── app.go          # Desktop app logic
+│   │   ├── main.go         # Desktop entry
+│   │   └── frontend/       # Vue/native modular frontend
+│   ├── server/             # Headless server mode
+│   └── license-server/     # Online license service
 ├── internal/
 │   ├── proxy/              # HTTP proxy core
 │   ├── transformer/        # API format transformers
 │   ├── storage/            # SQLite data storage
+│   ├── service/            # Endpoint, stats, backup, and update services
 │   ├── config/             # Configuration management
+│   ├── onlinelicense/      # Online license cards and device activation
 │   ├── webdav/             # WebDAV sync
 │   ├── logger/             # Logging system
 │   └── tray/               # System tray
-└── frontend/               # Frontend code
-    ├── src/modules/        # Feature modules
-    ├── src/i18n/           # Internationalization
-    └── src/themes/         # Theme styles
+└── docs/                   # Configuration, development, FAQ, and model API docs
 ```

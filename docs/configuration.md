@@ -13,13 +13,21 @@
 
 ## 端点配置
 
+### 认证模式
+
+| 认证模式 | 说明 |
+|----------|------|
+| `api_key` | 使用普通 API Key 调用上游服务 |
+| `token_pool` | 使用通用 Token Pool，适合需要轮换凭证的 OpenAI 兼容服务 |
+| `codex_token_pool` | 使用 Codex Token Pool，自动适配 ChatGPT Codex 后端、凭证轮换、刷新和失效隔离 |
+
 ### 转换器类型
 
 | 转换器 | 说明 |
 |--------|------|
-| `claude` | Claude API |
-| `openai` | OpenAI Chat API |
-| `openai2` | OpenAI Response API |
+| `claude` | Claude / Anthropic 兼容 API |
+| `openai` | OpenAI Chat Completions 兼容 API |
+| `openai2` | OpenAI Responses API，推荐给 Codex CLI |
 | `gemini` | Google Gemini API |
 | `deepseek` | DeepSeek OpenAI Chat 兼容 API |
 | `kimi` | Kimi/Moonshot OpenAI Chat 兼容 API |
@@ -41,11 +49,34 @@
 ```json
 {
   "name": "OpenAI 代理",
-  "apiUrl": "https://api.openai.com",
+  "apiUrl": "https://api.openai.com/v1",
   "apiKey": "sk-xxx",
   "enabled": true,
   "transformer": "openai",
   "model": "gpt-4-turbo"
+}
+```
+
+**Codex CLI / OpenAI Responses 端点：**
+```json
+{
+  "name": "OpenAI Responses",
+  "apiUrl": "https://api.openai.com/v1",
+  "apiKey": "sk-xxx",
+  "enabled": true,
+  "transformer": "openai2",
+  "model": "gpt-5-codex"
+}
+```
+
+**Codex Token Pool 端点：**
+```json
+{
+  "name": "Codex Token Pool",
+  "authMode": "codex_token_pool",
+  "enabled": true,
+  "transformer": "openai2",
+  "model": "gpt-5-codex"
 }
 ```
 
@@ -87,7 +118,7 @@
 
 ## WebDAV 云同步
 
-支持通过 WebDAV 协议同步配置和统计数据，兼容坚果云、NextCloud、ownCloud 等服务。
+支持通过 WebDAV 协议同步配置和统计数据，兼容坚果云、NextCloud、ownCloud 等服务。AINexus 也支持本地备份和 S3 兼容存储，适合在多设备之间迁移配置。
 
 **配置步骤：**
 1. 点击界面上的「WebDAV 云备份」
@@ -97,4 +128,5 @@
 
 ## 数据存储位置
 
-- 数据库：`~/.ccNexus/ccnexus.db`
+- 桌面端数据库：`~/.AINexus/ainexus.db`
+- 服务器模式可通过 `AINEXUS_DATA_DIR` 或 `AINEXUS_DB_PATH` 指定数据目录和数据库路径

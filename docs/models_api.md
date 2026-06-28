@@ -1,7 +1,7 @@
 # /v1/models API 使用说明
 
 ## 功能概述
-ccNexus 现已支持 OpenAI 兼容的 `/v1/models` API，聚合所有后端端点的模型列表。
+AINexus 支持 OpenAI 兼容的 `/v1/models` API，可聚合所有已配置后端端点的模型列表，便于 Codex CLI、OpenAI Responses 兼容客户端和其他工具自动发现可用模型。
 
 ## 快速开始
 
@@ -37,7 +37,7 @@ curl http://localhost:3000/v1/models?refresh=true
 ```
 
 ## 配置项
-在 `config.json` 中添加：
+可在应用配置中设置模型缓存时间：
 ```json
 {
   "modelsCacheTTL": 30  // 缓存时间（分钟），默认30
@@ -48,6 +48,7 @@ curl http://localhost:3000/v1/models?refresh=true
 - **openai/openai2**: 自动查询后端 /v1/models
 - **gemini**: 自动查询后端 /v1beta/models
 - **claude**: 使用配置的 model 字段（无API查询）
+- **deepseek/kimi**: 使用 OpenAI Chat 兼容模型配置
 
 ## 特性
 - ✅ 聚合多后端模型列表
