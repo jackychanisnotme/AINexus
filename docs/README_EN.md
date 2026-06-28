@@ -1,11 +1,11 @@
 <div align="center">
 
 <p align="center">
-  <img src="images/ccNexus.svg" alt="Claude Code, Codex CLI, Hermes Agent, and OpenClaw API Provider Switching Hub" width="720" />
+  <img src="images/ainexus.svg" alt="Claude Code, Codex CLI, Hermes Agent, and OpenClaw API Provider Switching Hub" width="720" />
 </p>
 
-[![Build Status](https://github.com/jackychanisnotme/ccNexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/ccNexus/actions)
-[![Latest Release](https://img.shields.io/github/v/release/jackychanisnotme/ccNexus?label=release)](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+[![Build Status](https://github.com/jackychanisnotme/AINexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/AINexus/actions)
+[![Latest Release](https://img.shields.io/github/v/release/jackychanisnotme/AINexus?label=release)](https://github.com/jackychanisnotme/AINexus/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-blue)](https://wails.io/)
@@ -14,17 +14,17 @@
 
 </div>
 
-ccNexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI, Hermes Agent, and OpenClaw. It is an API resource management system for AI development workflows, bringing endpoints, models, API keys, Codex Token Pools, quota snapshots, usage statistics, and backups into one local control plane. It also works as a stable local API provider: point Hermes, OpenClaw, Codex, Claude Code, and compatible clients at ccNexus once, then hot-switch between upstream providers, accounts, and models without repeatedly editing every tool's config.
+AINexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI, Hermes Agent, and OpenClaw. It is an API resource management system for AI development workflows, bringing endpoints, models, API keys, Codex Token Pools, quota snapshots, usage statistics, and backups into one local control plane. It also works as a stable local API provider: point Hermes, OpenClaw, Codex, Claude Code, and compatible clients at AINexus once, then hot-switch between upstream providers, accounts, and models without repeatedly editing every tool's config.
 
 > [!IMPORTANT]
-> This fork maintains the Optimized line, with extra compatibility for Codex CLI, Claude Code, Hermes Agent, OpenClaw, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
+> This repository maintains the Optimized line, with extra compatibility for Codex CLI, Claude Code, Hermes Agent, OpenClaw, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
 >
-> Latest release: [`ccNexus Optimized`](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+> Latest release: [`AINexus`](https://github.com/jackychanisnotme/AINexus/releases/latest)
 
 ## Features
 
 - **One Local API Provider**: Connect Claude Code, Codex CLI, Hermes Agent, OpenClaw, OpenAI Chat/Responses-compatible clients, and model tools to one local base URL
-- **Hot Switching Across Clients**: Point Hermes, OpenClaw, Codex, and Claude Code provider/base URLs at ccNexus, then switch the current endpoint, enable or disable endpoints, or adjust priority in ccNexus to move clients to a new upstream, account, or model without changing each client again
+- **Hot Switching Across Clients**: Point Hermes, OpenClaw, Codex, and Claude Code provider/base URLs at AINexus, then switch the current endpoint, enable or disable endpoints, or adjust priority in AINexus to move clients to a new upstream, account, or model without changing each client again
 - **API Resource Management**: Manage endpoints, models, API keys, Token Pools, quota snapshots, usage statistics, and backup data in one place
 - **Endpoint Rotation and Failover**: Rotate across enabled endpoints and skip failing upstreams automatically
 - **Protocol Conversion**: Convert between Claude, OpenAI Chat, OpenAI Responses, Gemini, DeepSeek, and Kimi/Moonshot formats
@@ -36,20 +36,6 @@ ccNexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI,
 - **Live Statistics**: Event-driven usage updates with today/yesterday/week/month views
 - **Desktop and Server Modes**: Use the Wails desktop app locally, or run `cmd/server` headlessly on a server, NAS, or Docker host
 - **Backup and Sync**: Support WebDAV, local backups, and S3-compatible storage
-
-## Design Trade-Offs vs. the Original Project
-
-The Optimized line keeps the original [lich0821/ccNexus](https://github.com/lich0821/ccNexus) idea of one local proxy gateway, while shifting the focus from simple rotation to long-running, multi-endpoint, concurrent AI workflows. The original design is smaller and easier to reason about; the Optimized line puts more weight on resilience, observability, and Codex/Responses compatibility.
-
-| Area | Original Strength | Optimized Improvement |
-|------|-------------------|-----------------------|
-| Failover model | Global endpoint rotation after failures, direct and easy to inspect | Request-local fallback that avoids changing the global default endpoint for unrelated requests |
-| Error handling | Simple policy with low maintenance overhead | Classifies quota exhaustion, rate limits, upstream 5xx, network errors, API key failures, and wrapped invalid requests |
-| Endpoint recovery | Minimal hidden state, highly predictable behavior | Configurable cooldowns with auto-return or deprioritization for recovered endpoints |
-| Streaming reliability | Compact traditional proxy behavior | SSE heartbeat, forced upstream streaming, streaming error classification, and semantic empty-output detection |
-| Operations visibility | Basic logs and stats | Request IDs, attempt headers, retry reasons, endpoint runtime state, and per-credential usage/quota snapshots |
-
-For a lightweight local rotation proxy, the original version remains refreshingly simple. For running Claude Code, Codex CLI, Hermes Agent, OpenClaw, Token Pools, and multiple third-party upstreams together for long sessions while sharing one hot-switchable API provider across clients, the Optimized line provides stronger isolation, recovery, and visibility.
 
 ## Client Compatibility
 
@@ -71,10 +57,10 @@ For a lightweight local rotation proxy, the original version remains refreshingl
 
 ### 1. Download and Install
 
-[Download the latest release from this fork](https://github.com/jackychanisnotme/ccNexus/releases/latest)
+[Download the latest release for AINexus](https://github.com/jackychanisnotme/AINexus/releases/latest)
 
-- **macOS**: Extract the `.zip`, move `ccNexus.app` to Applications, then right-click → Open for the first run
-- **Windows**: Download `windows-amd64.zip`, extract it, then run `ccNexus.exe`
+- **macOS**: Extract the `.zip`, move `AINexus.app` to Applications, then right-click → Open for the first run
+- **Windows**: Download `windows-amd64.zip`, extract it, then run `AINexus.exe`
 - **Linux**: Build from source, or use server mode/Docker
 - **Server mode**: `cd cmd/server && go run main.go`
 
@@ -93,7 +79,7 @@ Common transformers:
 For Codex Token Pool mode:
 - Set auth mode to `Codex Token Pool`
 - Import token JSON records in the Token Pool page (`access_token` + `refresh_token`)
-- ccNexus will lock the upstream URL and `openai2` transformer, then handle token rotation, 401-triggered refresh, quota snapshots, and lifecycle statuses
+- AINexus will lock the upstream URL and `openai2` transformer, then handle token rotation, 401-triggered refresh, quota snapshots, and lifecycle statuses
 
 Optional enhancements:
 - Enable endpoint reasoning and select the effort level for providers that support it
@@ -119,19 +105,19 @@ Optional enhancements:
 #### Codex CLI
 Responses API is recommended:
 ```toml
-model_provider = "ccNexus"
+model_provider = "AINexus"
 model = "gpt-5-codex"
 preferred_auth_method = "apikey"
 
-[model_providers.ccNexus]
-name = "ccNexus"
+[model_providers.AINexus]
+name = "AINexus"
 base_url = "http://localhost:3000/v1"
 wire_api = "responses"  # or "chat"
 
 # Other settings
 ```
 
-`~/.codex/auth.json` can be ignored because ccNexus handles endpoint or Token Pool authentication.
+`~/.codex/auth.json` can be ignored because AINexus handles endpoint or Token Pool authentication.
 
 ## Runtime Modes
 
@@ -140,7 +126,7 @@ wire_api = "responses"  # or "chat"
 | Desktop | `cmd/desktop` | Local GUI, tray app, visual endpoint and Token Pool management |
 | Server | `cmd/server` | Remote servers, NAS, Docker, and headless HTTP proxy usage |
 
-Server mode supports `CCNEXUS_PORT`, `CCNEXUS_LOG_LEVEL`, `CCNEXUS_DB_PATH`, `CCNEXUS_DATA_DIR`, `CCNEXUS_BASIC_AUTH_USERNAME`, and `CCNEXUS_BASIC_AUTH_PASSWORD`.
+Server mode supports `AINEXUS_PORT`, `AINEXUS_LOG_LEVEL`, `AINEXUS_DB_PATH`, `AINEXUS_DATA_DIR`, `AINEXUS_BASIC_AUTH_USERNAME`, and `AINEXUS_BASIC_AUTH_PASSWORD`.
 
 ## Documentation
 
