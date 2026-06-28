@@ -46,10 +46,20 @@ AINexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI,
 | Hermes Agent | Claude or OpenAI-compatible gateway, depending on the client protocol | Stable |
 | OpenClaw | Claude or OpenAI-compatible gateway | Stable |
 
+## Interface Preview
+
+The AINexus desktop app keeps usage statistics, endpoint controls, client launchers, data sync, and debug logs in one control panel so Codex CLI, Claude Code, Hermes Agent, and OpenClaw can share a single local API provider.
+
 <table>
   <tr>
-    <td align="center"><img src="images/EN-Light.png" alt="Light Theme" width="400"></td>
-    <td align="center"><img src="images/EN-Dark.png" alt="Dark Theme" width="400"></td>
+    <td align="center">
+      <img src="images/AINexus-EN-Light.png" alt="AINexus light theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <sub>Light theme: statistics, endpoint management, and logs</sub>
+    </td>
+    <td align="center">
+      <img src="images/AINexus-EN-Dark.png" alt="AINexus dark theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <sub>Dark theme: the same control panel for long-running desktop use</sub>
+    </td>
   </tr>
 </table>
 
