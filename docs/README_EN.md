@@ -1,0 +1,149 @@
+<div align="center">
+
+<p align="center">
+  <img src="images/ainexus.svg" alt="Claude Code, Codex CLI, Hermes Agent, and OpenClaw API Provider Switching Hub" width="720" />
+</p>
+
+[![Build Status](https://github.com/jackychanisnotme/AINexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/AINexus/actions)
+[![Latest Release](https://img.shields.io/github/v/release/jackychanisnotme/AINexus?label=release)](https://github.com/jackychanisnotme/AINexus/releases/latest)
+[![License](https://img.shields.io/badge/License-Source--Available-blue.svg)](../LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
+[![Wails](https://img.shields.io/badge/Wails-v2-blue)](https://wails.io/)
+
+[English](README_EN.md) | [简体中文](../README.md)
+
+</div>
+
+AINexus is more than a smart endpoint rotation proxy for Claude Code, Codex CLI, Hermes Agent, and OpenClaw. It is an API resource management system for AI development workflows, bringing endpoints, models, API keys, Codex Token Pools, quota snapshots, usage statistics, and backups into one local control plane. It also works as a stable local API provider: point Hermes, OpenClaw, Codex, Claude Code, and compatible clients at AINexus once, then hot-switch between upstream providers, accounts, and models without repeatedly editing every tool's config.
+
+> [!IMPORTANT]
+> This repository maintains the Optimized line, with extra compatibility for Codex CLI, Claude Code, Hermes Agent, OpenClaw, OpenAI Responses API, DeepSeek, and Kimi/Moonshot.
+>
+> Latest release: [`AINexus`](https://github.com/jackychanisnotme/AINexus/releases/latest)
+
+## Features
+
+- **One Local API Provider**: Connect Claude Code, Codex CLI, Hermes Agent, OpenClaw, OpenAI Chat/Responses-compatible clients, and model tools to one local base URL
+- **Hot Switching Across Clients**: Point Hermes, OpenClaw, Codex, and Claude Code provider/base URLs at AINexus, then switch the current endpoint, enable or disable endpoints, or adjust priority in AINexus to move clients to a new upstream, account, or model without changing each client again
+- **API Resource Management**: Manage endpoints, models, API keys, Token Pools, quota snapshots, usage statistics, and backup data in one place
+- **Endpoint Rotation and Failover**: Rotate across enabled endpoints and skip failing upstreams automatically
+- **Protocol Conversion**: Convert between Claude, OpenAI Chat, OpenAI Responses, Gemini, DeepSeek, and Kimi/Moonshot formats
+- **Codex Token Pool**: Bulk import `access_token/refresh_token`, rotate credentials, refresh after 401s, isolate invalid tokens, and target the ChatGPT Codex backend automatically
+- **Credential Usage and Rate Insights**: Capture Codex quota snapshots and show per-credential requests, errors, token usage, and recent activity
+- **Endpoint-Level Reasoning Control**: Set `low` / `medium` / `high` / `xhigh` reasoning effort, or explicitly disable upstream thinking where supported
+- **Forced Streaming Upstream Mode**: Use streaming upstream requests for providers that reject non-streaming calls while aggregating output for non-streaming clients
+- **Model and Compatibility APIs**: Serve `/v1/models`, `/models`, `/api/tags`, `/version`, `/props`, `/health`, and `/stats` for client discovery and monitoring
+- **Live Statistics**: Event-driven usage updates with today/yesterday/week/month views
+- **Desktop and Server Modes**: Use the Wails desktop app locally, or run `cmd/server` headlessly on a server, NAS, or Docker host
+- **Backup and Sync**: Support WebDAV, local backups, and S3-compatible storage
+
+## Client Compatibility
+
+| Client | Recommended Entry | Status |
+|--------|-------------------|--------|
+| Claude Code | Claude / Anthropic-compatible gateway | Stable |
+| Codex CLI | OpenAI Responses API, preferably with the `openai2` transformer | Stable |
+| Hermes Agent | Claude or OpenAI-compatible gateway, depending on the client protocol | Stable |
+| OpenClaw | Claude or OpenAI-compatible gateway | Stable |
+
+## Interface Preview
+
+The AINexus desktop app keeps usage statistics, endpoint controls, client launchers, data sync, and debug logs in one control panel so Codex CLI, Claude Code, Hermes Agent, and OpenClaw can share a single local API provider.
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="images/AINexus-v6.5.4-EN-Light.png" alt="AINexus 6.5.4 light theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <sub>Light theme: statistics, endpoint management, and logs</sub>
+    </td>
+    <td align="center">
+      <img src="images/AINexus-v6.5.4-EN-Dark.png" alt="AINexus 6.5.4 dark theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <sub>Dark theme: the same control panel for long-running desktop use</sub>
+    </td>
+  </tr>
+</table>
+
+## Quick Start
+
+### 1. Download and Install
+
+[Download the latest release for AINexus](https://github.com/jackychanisnotme/AINexus/releases/latest)
+
+- **macOS**: Extract the `.zip`, move `AINexus.app` to Applications, then right-click → Open for the first run
+- **Windows**: Download `windows-amd64.zip`, extract it, then run `AINexus.exe`
+- **Linux**: Build from source, or use server mode/Docker
+- **Server mode**: `cd cmd/server && go run main.go`
+
+### 2. Add Endpoints
+
+Click "Add Endpoint", then fill in the API URL, key, auth mode, transformer, and target model.
+
+Common transformers:
+- `claude`: Claude / Anthropic-compatible APIs
+- `openai`: OpenAI Chat Completions-compatible APIs
+- `openai2`: OpenAI Responses API, recommended for Codex CLI
+- `gemini`: Google Gemini
+- `deepseek`: DeepSeek Chat-compatible APIs
+- `kimi`: Kimi / Moonshot-compatible APIs
+
+For Codex Token Pool mode:
+- Set auth mode to `Codex Token Pool`
+- Import token JSON records in the Token Pool page (`access_token` + `refresh_token`)
+- AINexus will lock the upstream URL and `openai2` transformer, then handle token rotation, 401-triggered refresh, quota snapshots, and lifecycle statuses
+
+Optional enhancements:
+- Enable endpoint reasoning and select the effort level for providers that support it
+- Enable forced streaming when an upstream only accepts streaming requests
+- Use the model fetch button next to the model field to pull upstream model IDs
+
+### 3. Configure Clients
+
+#### Claude Code
+`~/.claude/settings.json`
+```json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "anything, not important",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000", // Some models may not support 64k
+  }
+  // Other settings
+}
+
+```
+
+#### Codex CLI
+Responses API is recommended:
+```toml
+model_provider = "AINexus"
+model = "gpt-5-codex"
+preferred_auth_method = "apikey"
+
+[model_providers.AINexus]
+name = "AINexus"
+base_url = "http://localhost:3000/v1"
+wire_api = "responses"  # or "chat"
+
+# Other settings
+```
+
+`~/.codex/auth.json` can be ignored because AINexus handles endpoint or Token Pool authentication.
+
+## Runtime Modes
+
+| Mode | Entry | Best For |
+|------|-------|----------|
+| Desktop | `cmd/desktop` | Local GUI, tray app, visual endpoint and Token Pool management |
+| Server | `cmd/server` | Remote servers, NAS, Docker, and headless HTTP proxy usage |
+
+Server mode supports `AINEXUS_PORT`, `AINEXUS_LOG_LEVEL`, `AINEXUS_DB_PATH`, `AINEXUS_DATA_DIR`, `AINEXUS_BASIC_AUTH_USERNAME`, and `AINEXUS_BASIC_AUTH_PASSWORD`.
+
+## Documentation
+
+- [Configuration Guide](configuration_en.md)
+- [Development Guide](development_en.md)
+- [FAQ](FAQ_en.md)
+
+## License
+
+This project uses the [AINexus Source-Available License](../LICENSE). The source code and compiled binaries may be viewed, downloaded, copied, run, and modified for non-commercial personal, educational, research, and evaluation purposes. Commercial use requires prior written authorization from the repository owner.

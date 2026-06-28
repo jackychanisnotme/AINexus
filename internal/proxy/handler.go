@@ -1,0 +1,190 @@
+package proxy
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/lich0821/ccNexus/internal/config"
+	"github.com/lich0821/ccNexus/internal/logger"
+	"github.com/lich0821/ccNexus/internal/tokencount"
+)
+
+// handleHealth handles health check requests
+func (p *Proxy) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	endpoints := p.getEnabledEndpoints()
+
+	// Mask API keys before sending response to prevent security leak
+	maskedEndpoints := make([]config.Endpoint, len(endpoints))
+	for i, ep := range endpoints {
+		maskedEndpoints[i] = ep
+		maskedEndpoints[i].APIKey = maskAPIKey(ep.APIKey)
+	}
+
+	response := map[string]interface{}{
+		"status":            "healthy",
+		"enabled_endpoints": len(endpoints),
+		"endpoints":         maskedEndpoints,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// maskAPIKey masks an API key for security, showing only first 4 and last 4 characters
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
+}
+
+// handleStats handles statistics requests
+func (p *Proxy) handleStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	stats := p.GetStats()
+	json.NewEncoder(w).Encode(stats)
+}
+
+// GetStats returns current statistics
+func (p *Proxy) GetStats() *Stats {
+	return p.stats
+}
+
+// handleCountTokens handles token counting requests
+func (p *Proxy) handleCountTokens(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Model    string                   `json:"model"`
+		System   interface{}              `json:"system,omitempty"`
+		Messages []map[string]interface{} `json:"messages"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("Failed to decode count_tokens request: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	systemText := ""
+	if req.System != nil {
+		switch sys := req.System.(type) {
+		case string:
+			systemText = sys
+		case []interface{}:
+			for _, block := range sys {
+				if blockMap, ok := block.(map[string]interface{}); ok {
+					if text, ok := blockMap["text"].(string); ok {
+						systemText += text + "\n"
+					}
+				}
+			}
+		}
+	}
+
+	totalTokens := 0
+	if systemText != "" {
+		totalTokens += tokencount.EstimateOutputTokens(systemText)
+	}
+
+	for _, msg := range req.Messages {
+		content, ok := msg["content"]
+		if !ok {
+			continue
+		}
+
+		switch c := content.(type) {
+		case string:
+			totalTokens += tokencount.EstimateOutputTokens(c)
+		case []interface{}:
+			for _, block := range c {
+				if blockMap, ok := block.(map[string]interface{}); ok {
+					if text, ok := blockMap["text"].(string); ok {
+						totalTokens += tokencount.EstimateOutputTokens(text)
+					}
+				}
+			}
+		}
+	}
+
+	response := map[string]interface{}{
+		"input_tokens": totalTokens,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// UpdateConfig updates the proxy configuration
+func (p *Proxy) UpdateConfig(cfg *config.Config) error {
+	return p.UpdateConfigPreservingCurrentName(cfg, p.GetCurrentEndpointName())
+}
+
+// UpdateConfigPreservingCurrentName updates the proxy configuration while
+// preserving the named default endpoint when it is still enabled.
+func (p *Proxy) UpdateConfigPreservingCurrentName(cfg *config.Config, currentEndpointName string) error {
+	p.mu.Lock()
+
+	oldEndpoints := cloneEndpoints(p.configEndpointsSnapshot)
+
+	// Save current endpoint name
+	previousEndpointName := currentEndpointName
+	if previousEndpointName == "" && p.config != nil {
+		previousEndpointName = p.getCurrentEndpointLocked().Name
+	}
+
+	p.config = cfg
+	p.resolver = NewEndpointResolverWithFunc(cfg.GetEndpoints)
+	newEndpointsSnapshot := cfg.GetEndpoints()
+
+	// Try to find the previous current endpoint in new config
+	newEndpoints := p.getEnabledEndpoints()
+	newEndpointName := ""
+	if previousEndpointName != "" && len(newEndpoints) > 0 {
+		found := false
+		for i, ep := range newEndpoints {
+			if ep.Name == previousEndpointName {
+				p.currentIndex = i
+				found = true
+				newEndpointName = ep.Name
+				logger.Debug("[CONFIG UPDATE] Preserved current endpoint: %s at index %d", previousEndpointName, i)
+				break
+			}
+		}
+		if !found {
+			p.currentIndex = 0
+			if len(newEndpoints) > 0 {
+				newEndpointName = newEndpoints[0].Name
+			}
+			logger.Debug("[CONFIG UPDATE] Current endpoint '%s' not found, reset to index 0", previousEndpointName)
+		}
+	} else {
+		p.currentIndex = 0
+		if len(newEndpoints) > 0 {
+			newEndpointName = newEndpoints[0].Name
+		}
+	}
+
+	p.clearEndpointCooldownsForConfigChange(oldEndpoints, newEndpointsSnapshot)
+	p.configEndpointsSnapshot = cloneEndpoints(newEndpointsSnapshot)
+
+	// Clear models cache to force refresh with new endpoints
+	if p.modelsCache != nil {
+		p.modelsCache.Clear()
+		logger.Debug("[CONFIG UPDATE] Cleared models cache")
+	}
+
+	logger.Info("Configuration updated: %d endpoints configured", len(cfg.GetEndpoints()))
+	p.mu.Unlock()
+	p.emitCurrentEndpointChanged(previousEndpointName, newEndpointName, "config_update")
+	return nil
+}
