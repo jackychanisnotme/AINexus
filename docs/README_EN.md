@@ -6,7 +6,7 @@
 
 [![Build Status](https://github.com/jackychanisnotme/AINexus/actions/workflows/build.yml/badge.svg)](https://github.com/jackychanisnotme/AINexus/actions)
 [![Latest Release](https://img.shields.io/github/v/release/jackychanisnotme/AINexus?label=release)](https://github.com/jackychanisnotme/AINexus/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/License-Source--Available-blue.svg)](../LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-blue)](https://wails.io/)
 
@@ -146,4 +146,4 @@ Server mode supports `AINEXUS_PORT`, `AINEXUS_LOG_LEVEL`, `AINEXUS_DB_PATH`, `AI
 
 ## License
 
-[MIT](LICENSE)
+This project uses the [ccNexus Source-Available License](../LICENSE). The source code and compiled binaries may be viewed, downloaded, copied, run, and modified for non-commercial personal, educational, research, and evaluation purposes. Commercial use requires prior written authorization from the repository owner.
