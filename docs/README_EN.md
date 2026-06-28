@@ -53,11 +53,11 @@ The AINexus desktop app keeps usage statistics, endpoint controls, client launch
 <table>
   <tr>
     <td align="center">
-      <img src="images/AINexus-EN-Light.png" alt="AINexus light theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <img src="images/AINexus-v6.5.4-EN-Light.png" alt="AINexus 6.5.4 light theme showing statistics, endpoint controls, and logs" width="400"><br>
       <sub>Light theme: statistics, endpoint management, and logs</sub>
     </td>
     <td align="center">
-      <img src="images/AINexus-EN-Dark.png" alt="AINexus dark theme showing statistics, endpoint controls, and logs" width="400"><br>
+      <img src="images/AINexus-v6.5.4-EN-Dark.png" alt="AINexus 6.5.4 dark theme showing statistics, endpoint controls, and logs" width="400"><br>
       <sub>Dark theme: the same control panel for long-running desktop use</sub>
     </td>
   </tr>

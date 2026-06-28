@@ -53,11 +53,11 @@ AINexus 桌面端把统计概览、端点启停、客户端启动器、数据同
 <table>
   <tr>
     <td align="center">
-      <img src="docs/images/AINexus-CN-Light.png" alt="AINexus 中文明亮主题：统计概览、端点列表和日志面板" width="400"><br>
+      <img src="docs/images/AINexus-v6.5.4-CN-Light.png" alt="AINexus 6.5.4 中文明亮主题：统计概览、端点列表和日志面板" width="400"><br>
       <sub>中文明亮主题：统计概览、端点管理与日志调试</sub>
     </td>
     <td align="center">
-      <img src="docs/images/AINexus-CN-Dark.png" alt="AINexus 中文暗黑主题：统计概览、端点列表和日志面板" width="400"><br>
+      <img src="docs/images/AINexus-v6.5.4-CN-Dark.png" alt="AINexus 6.5.4 中文暗黑主题：统计概览、端点列表和日志面板" width="400"><br>
       <sub>中文暗黑主题：同一控制面板适合长时间驻留运行</sub>
     </td>
   </tr>
